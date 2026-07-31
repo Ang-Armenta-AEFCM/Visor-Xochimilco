@@ -1,8 +1,103 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visor Xochimilco | Proyecciones e Infraestructura</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><link rel="stylesheet" href="styles.css"></head><body>
-<header><div><h1>Visor educativo de Xochimilco</h1><p>Proyecciones de matrícula e infraestructura escolar</p></div><button id="menuBtn">☰</button></header>
-<div class="layout"><aside id="panel"><div class="tabs"><button class="tab active" data-view="proyeccion">Proyecciones</button><button class="tab" data-view="infraestructura">Infraestructura</button></div>
-<label>Buscar inmueble o CCT<input id="search" placeholder="Escribe nombre, CCT o ID"></label><label>Nivel<select id="nivel"><option value="">Todos</option></select></label>
-<section id="projectionControls"><label>Ciclo escolar<select id="year"></select></label><label>Tendencia<select id="trend"><option value="">Todas</option><option value="up">Crecimiento</option><option value="stable">Estabilidad</option><option value="down">Disminución</option></select></label><label class="check"><input type="checkbox" id="agebToggle" checked> Mostrar AGEB</label></section>
-<section id="infraControls" class="hidden"><label>Atención de revisión<select id="attention"><option value="">Todas</option></select></label><label>Programa<select id="program"><option value="">Todos</option></select></label><label class="check"><input type="checkbox" id="subToggle"> Subsidencia</label><label class="check"><input type="checkbox" id="fractToggle"> Fracturamiento</label></section>
-<button id="clear">Limpiar filtros</button><div id="stats" class="stats"></div><div class="legend" id="legend"></div><button id="download">Descargar CSV filtrado</button></aside><main><div id="map"></div><div id="detail" class="detail hidden"><button id="closeDetail">×</button><div id="detailContent"></div><canvas id="chart" height="150"></canvas></div></main></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Visor institucional de infraestructura educativa por alcaldía de la Ciudad de México.">
+  <title>Visor integral de infraestructura educativa Alcaldía Xochimilco</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+  <link rel="stylesheet" href="style.css?v=20260731-1">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon" aria-hidden="true"><i class="fa-solid fa-school"></i></div>
+    <div class="brand-text">
+      <h1>Visor integral de infraestructura educativa Alcaldía Xochimilco</h1>
+      <p>Sistema de información geográfica de planteles, atención de revisión y programas de mejora</p>
+    </div>
+  </div>
+  <nav class="topbar-actions"><a id="statsLink" class="topbar-button" href="estadisticas.html"><i class="fa-solid fa-chart-column" aria-hidden="true"></i><span>Estadísticas generales</span></a></nav>
+</header>
+<main class="layout" id="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head"><div><span class="panel-kicker">Infraestructura educativa</span><strong>Filtros del visor</strong></div><button id="toggleSidebar" class="icon-button" title="Ocultar menú" aria-label="Ocultar menú"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button></div>
+
+    <section class="panel">
+      <h2><i class="fa-solid fa-layer-group" aria-hidden="true"></i> Visualización</h2>
+      <label class="inline-check"><input type="checkbox" id="toggleSchools" checked><span>Mostrar escuelas</span></label>
+      <button id="modeMaintenance" class="mode-button active" type="button">Atención de Revisión Diagnóstico</button>
+    </section>
+
+    <section class="panel">
+      <h2><i class="fa-solid fa-filter" aria-hidden="true"></i> Filtros generales</h2>
+      <label for="filtroNivel">Nivel educativo</label><select id="filtroNivel"><option value="">Todos</option></select>
+      <label for="buscarCCT">Buscar por CCT</label><input id="buscarCCT" list="listaCCT" type="search" placeholder="Escribe o selecciona CCT"><datalist id="listaCCT"></datalist>
+      <label for="buscarNombre">Buscar por escuela</label><input id="buscarNombre" list="listaNombres" type="search" placeholder="Nombre del inmueble"><datalist id="listaNombres"></datalist>
+      <div class="buttons"><button id="btnAplicar">Aplicar filtros</button><button id="btnLimpiar" class="secondary">Limpiar</button></div>
+    </section>
+
+    <section class="panel">
+      <h2><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i> Atención de Revisión Diagnóstico</h2><p class="hint">Selecciona una o varias variables de Atención de Revisión. El resumen y el mapa mostrarán únicamente las escuelas que cumplen la selección.</p>
+      <div id="maintenanceFilters" class="checklist"></div>
+    </section>
+
+    <section class="panel collapsible-panel">
+      <button id="toggleMejoras" class="collapse-title" aria-expanded="false"><span><i class="fa-solid fa-building-circle-check" aria-hidden="true"></i> Mejoras</span><span id="mejorasArrow">›</span></button>
+      <div id="mejorasBody" class="collapsible-body hidden">
+        <p class="hint">Selecciona el programa o tipo de apoyo que deseas consultar.</p>
+        <label class="inline-check"><input type="radio" name="themeMode" value="fam_regular"><span>FAM Regular 2025</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="programa_123"><span>1, 2, 3 por mi Escuela</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="fam_potenciado"><span>FAM Potenciado 2025</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="fam_potenciado_basico_2026"><span>FAM Potenciado + FAM Básico 2026</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="fam_reforzamiento"><span>FAM Reforzamiento estructural</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="programa_123_2026"><span>1, 2, 3 por mi Escuela 2026</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="alcaldia_apoyo"><span>Alcaldía</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="ambas"><span>Escuelas con mantenimiento y reforzamiento</span></label>
+        <button type="button" id="clearMejoras" class="submenu-clear">Quitar selección</button>
+      </div>
+    </section>
+
+    <section class="panel collapsible-panel">
+      <button id="toggleRiesgos" class="collapse-title" aria-expanded="false"><span><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Observaciones territoriales</span><span id="riesgosArrow">›</span></button>
+      <div id="riesgosBody" class="collapsible-body hidden">
+        <p class="hint">Estas opciones identifican escuelas que ameritan revisión por su cercanía a fracturamientos o por ubicarse en zonas de subsidencia alta.</p>
+        <label class="inline-check"><input type="radio" name="themeMode" value="obs_fractura"><span>Revisión por cercanía a fracturamiento</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="obs_subsidencia"><span>Seguimiento por subsidencia alta</span></label>
+        <label class="inline-check"><input type="radio" name="themeMode" value="obs_combinada"><span>Observación territorial combinada</span></label>
+        <button type="button" id="clearRiesgos" class="submenu-clear">Quitar selección</button>
+        <hr class="soft-rule">
+        <label class="inline-check"><input type="checkbox" id="toggleSubsidencias"><span>Mostrar subsidencias</span></label>
+        <label class="inline-check"><input type="checkbox" id="toggleFracturamiento"><span>Mostrar fracturamiento</span></label>
+      </div>
+    </section>
+
+    <section class="panel compact">
+      <h2><i class="fa-solid fa-chart-simple" aria-hidden="true"></i> <span id="summaryTitle">Resumen visible</span></h2>
+      <div class="kpis dynamic-kpis">
+        <div><strong id="kpi1">0</strong><span id="kpiLabel1">Escuelas</span></div>
+        <div><strong id="kpi2">0</strong><span id="kpiLabel2">Mayor número de necesidades</span></div>
+        <div><strong id="kpi3">0</strong><span id="kpiLabel3">Con observación</span></div>
+        <div><strong id="kpi4">—</strong><span id="kpiLabel4">Tema</span></div>
+      </div>
+    </section>
+  </aside>
+
+  <button id="showSidebar" class="show-sidebar hidden" title="Mostrar menú"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Menú</button>
+  <section class="maparea">
+    <div id="map"></div>
+    <div id="legend" class="legend"><div class="legend-head"><strong id="legendTitle">Atención de Revisión Diagnóstico</strong><button id="toggleLegend">−</button></div><div id="legendBody"></div></div>
+    <div id="subsidenciaLegend" class="legend extra-legend hidden"><div class="legend-head"><strong>Subsidencia acumulada</strong><button id="toggleSubLegend">−</button></div><div id="subLegendBody"><div><span class="swatch square s-muy-bajo"></span>0 a 7 cm Muy bajo</div><div><span class="swatch square s-bajo"></span>8 a 15 cm Bajo</div><div><span class="swatch square s-medio"></span>16 a 23 cm Medio</div><div><span class="swatch square s-alto"></span>24 a 31 cm Alto</div><div><span class="swatch square s-muy-alto"></span>32 a 40 cm Muy alto</div></div></div>
+    <div class="map-status"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Selecciona una escuela para consultar su información.</span></div>
+    <aside id="detailPanel" class="detail-panel">
+      <div class="details-header"><div><span class="panel-kicker">Detalle</span><h2 id="detailTitle">Seleccione una escuela</h2></div><button id="closeDetail" class="close" aria-label="Cerrar panel" title="Cerrar"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+      <div id="detailContent" class="detail-content"><p>Haga clic en un punto del mapa para consultar la información.</p></div>
+    </aside>
+  </section>
+</main>
+<footer class="footer"><span>Visor integral de infraestructura educativa Alcaldía Xochimilco</span><span>Consulta institucional por alcaldía · Ciudad de México</span></footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="script.js?v=20260731-1"></script>
+</body>
+</html>
