@@ -1,305 +1,551 @@
-const DATA_PATHS={schoolsGeoJSON:'data/infraestructura_educativa_2026.json',alcaldias:'data/alcaldias.json',agebs:'data/ageb.json',subsidencias:'data/subsidencias.json',fracturamiento:'data/fracturamiento.json',mantenimiento:'data/mantenimiento.json',reforzamiento:'data/reforzamiento.json',famPotenciado:'data/fam_potenciado_2025.json',programa123_2026:'data/123_por_mi_escuela_2026.json',alcaldiaApoyo:'data/beneficiadas_alcaldia_iztapalapa.json',famPotenciadoBasico2026:'data/fam_potenciado_basico_2026.json'};
-const FIELDS={alcaldia:'alcaldia',nivel:'principal',nombre:'inmueble',ccts:['cct1','cct2','cct3','cct4'],x:'coord_x',y:'coord_y',indice:'Indice_Man'};
-const MAINTENANCE_FIELDS=['impermeabi','interior','exterior1','loseta','ventanas','ventanas1','ventanas2','puertas','escaleras','pluviales','techos','desazolve','deterioro','concreto','tinacos','cisterna','agua','agua1','hidrosanit','sanitarios','luminarias','electrica','transforma','lamina'];
-const MAINTENANCE_LABELS={impermeabi:'Impermeabilización',interior:'Pintura interior',exterior1:'Pintura exterior',loseta:'Loseta',ventanas:'Vidrios / ventanas',ventanas1:'Cancelería de aluminio / ventanas',ventanas2:'Cancelería de herrería / ventanas',puertas:'Puertas',escaleras:'Barandales, pasillos o escaleras',pluviales:'Bajadas pluviales',techos:'Muros o techos',desazolve:'Desazolve',deterioro:'Deterioro de estructura o acabados',concreto:'Concreto',tinacos:'Tinacos',cisterna:'Cisterna',agua:'Agua potable',agua1:'Red o abastecimiento de agua',hidrosanit:'Instalación hidrosanitaria',sanitarios:'Sanitarios',luminarias:'Luminarias',electrica:'Instalación eléctrica',transforma:'Transformador',lamina:'Lámina'};
-const SUPPORT_KEYWORDS={impermeabi:['impermeabil'],interior:['pintura en edificios','pintura de aulas','pintura interior','pintura en aulas'],exterior1:['pintura en fachada','pintura de fachada','pintura exterior','fachada'],loseta:['loseta','piso','pisos'],ventanas:['vidrio','vidrios','ventana','ventanas'],ventanas1:['canceleria de aluminio','aluminio'],ventanas2:['canceleria','herreria'],puertas:['puerta','puertas'],escaleras:['escalera','escaleras','barandal','barandales','pasillo','pasillos'],pluviales:['pluvial','pluviales','bajada de agua'],techos:['techo','techos','azotea','azoteas'],desazolve:['desazolve'],deterioro:['estructura','estructural','acabados','grieta','grietas'],concreto:['concreto'],tinacos:['tinaco','tinacos'],cisterna:['cisterna','cisternas'],agua:['agua potable'],agua1:['red de agua','abastecimiento de agua'],hidrosanit:['hidrosanitaria','hidrosanitarias'],sanitarios:['sanitario','sanitarios','nucleo sanitario','nucleos sanitarios'],luminarias:['luminaria','luminarias','alumbrado'],electrica:['electrica','electricas','electrico','electricos'],transforma:['transformador','transformadores'],lamina:['lamina','laminas','cubierta','cubiertas']};
-const STRUCTURAL_RELATED_FIELDS=new Set(['deterioro','concreto','techos','escaleras']);
-const COLORS={'Muy baja':'#2ca25f','Baja':'#a1d99b','Media':'#ffd166','Alta':'#f97316','Muy alta':'#dc2626'};
-const OBS_COLORS={fractura:'#c2410c',subsidencia:'#ca8a04',combinada:'#b91c1c',reforzada:'#7c3aed',neutral:'#64748b'};
-let allSchools=[],filteredSchools=[],alcaldiasGeoJSON=null,agebsGeoJSON=null,subsidenciasGeoJSON=null,fracturamientoGeoJSON=null,activeMode='mantenimiento',schoolsVisible=true,selectedFractureLayer=null;
-let schoolLayer=L.layerGroup(),alcaldiaBoundaryLayer=null,agebBoundaryLayer=null,subsidenciaLayer=null,fracturamientoLayer=null;
-const map=L.map('map',{zoomControl:true,preferCanvas:true}).setView([19.35,-99.13],10);
-const baseLayers={'Mapa claro':L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'© OpenStreetMap © CARTO'}),'OpenStreetMap':L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}),'Satélite':L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}),'Mapa oscuro':L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'© OpenStreetMap © CARTO'})};
-baseLayers['Mapa claro'].addTo(map);L.control.layers(baseLayers,{}, {collapsed:true,position:'bottomright'}).addTo(map);schoolLayer.addTo(map);
-document.addEventListener('DOMContentLoaded',init);
-async function init(){buildMaintenanceMenu();bindUI();const [schools,alcaldias,agebs,subs,fracs,mant,ref,famPot,p123_2026,alcApoyo,famPB2026]=await Promise.all([loadSchools(),fetchJsonSafe(DATA_PATHS.alcaldias),fetchJsonSafe(DATA_PATHS.agebs),fetchJsonSafe(DATA_PATHS.subsidencias),fetchJsonSafe(DATA_PATHS.fracturamiento),fetchJsonSafe(DATA_PATHS.mantenimiento),fetchJsonSafe(DATA_PATHS.reforzamiento),fetchJsonSafe(DATA_PATHS.famPotenciado),fetchJsonSafe(DATA_PATHS.programa123_2026),fetchJsonSafe(DATA_PATHS.alcaldiaApoyo),fetchJsonSafe(DATA_PATHS.famPotenciadoBasico2026)]);allSchools=schools;joinImprovements(allSchools,mant||[],ref||[],famPot||[],p123_2026||[],alcApoyo||[],famPB2026||[]);filteredSchools=[...allSchools];alcaldiasGeoJSON=alcaldias;agebsGeoJSON=agebs;subsidenciasGeoJSON=subs;fracturamientoGeoJSON=fracs;drawBoundaries();drawExtraLayers();populateFilters();restoreState();updateMap();}
-async function loadSchools(){const geo=await fetchJsonSafe(DATA_PATHS.schoolsGeoJSON);if(geo?.features?.length)return geo.features.map(normalizeFeature).filter(Boolean);throw new Error('No fue posible cargar la base maestra de infraestructura educativa.');}
-async function fetchJsonSafe(url){try{const r=await fetch(url,{cache:'no-store'});return r.ok?await r.json():null}catch{return null}}
-function normalizeFeature(f,i){const p=f.properties||{},c=f.geometry?.coordinates||[];const lon=Number(c[0]??p[FIELDS.x]),lat=Number(c[1]??p[FIELDS.y]);return Number.isFinite(lat)&&Number.isFinite(lon)?normalizeCommon(p,lat,lon,i):null}
-function normalizeRow(p,i){const lon=Number(p[FIELDS.x]),lat=Number(p[FIELDS.y]);return Number.isFinite(lat)&&Number.isFinite(lon)?normalizeCommon(p,lat,lon,i):null}
-function normalizeCommon(p,lat,lon,i){const indice=Number.isFinite(Number(p[FIELDS.indice]))?Number(p[FIELDS.indice]):MAINTENANCE_FIELDS.reduce((a,f)=>a+toBinary(p[f]),0);return{id:cleanText(p.idinmueble)||`escuela-${i}`,lat,lon,props:p,nombre:cleanText(p[FIELDS.nombre])||'Escuela sin nombre',alcaldia:normalizeAlcaldia(p[FIELDS.alcaldia]),nivel:normalizeText(p[FIELDS.nivel]),ccts:FIELDS.ccts.map(f=>normalizeCCT(p[f])).filter(Boolean),indice,clasificacion:classifyIndex(indice),needs:MAINTENANCE_FIELDS.filter(f=>toBinary(p[f])===1),subsidenciaNivel:Number(p.subsidencia_nivel)||null,subsidenciaClase:cleanText(p.subsidencia_clase),distFractura:Number.isFinite(Number(p.dist_fractura_m))?Number(p.dist_fractura_m):null,mantenimiento:null,reforzamiento:null,famPotenciado:null,programa123_2026:null,alcaldiaApoyo:null,famPotenciadoBasico2026:null,marker:null};}
-function joinImprovements(schools,mant,ref,famPot,p123_2026,alcApoyo,famPB2026){const mm=new Map(),rr=new Map(),ff=new Map(),p26=new Map(),aa=new Map(),fpb26=new Map();mant.forEach(x=>{const c=normalizeCCT(x.cct);if(c)mm.set(c,x)});ref.forEach(x=>{const c=normalizeCCT(x.cct);if(c)rr.set(c,x)});famPot.forEach(x=>{const c=normalizeCCT(x.cct);if(c)ff.set(c,x)});p123_2026.forEach(x=>{const c=normalizeCCT(x.cct);if(c)p26.set(c,x)});alcApoyo.forEach(x=>{const c=normalizeCCT(x.cct);if(c)aa.set(c,x)});famPB2026.forEach(x=>{const c=normalizeCCT(x.cct);if(c)fpb26.set(c,x)});schools.forEach(s=>{s.mantenimiento=s.ccts.map(c=>mm.get(c)).find(Boolean)||null;s.reforzamiento=s.ccts.map(c=>rr.get(c)).find(Boolean)||null;s.famPotenciado=s.ccts.map(c=>ff.get(c)).find(Boolean)||null;s.programa123_2026=s.ccts.map(c=>p26.get(c)).find(Boolean)||null;s.alcaldiaApoyo=s.ccts.map(c=>aa.get(c)).find(Boolean)||null;s.famPotenciadoBasico2026=s.ccts.map(c=>fpb26.get(c)).find(Boolean)||null;});}
-function buildMaintenanceMenu(){q('maintenanceFilters').innerHTML=MAINTENANCE_FIELDS.map(f=>`<label><input type="checkbox" value="${f}"><span>${MAINTENANCE_LABELS[f]}</span></label>`).join('')}
-function bindUI(){q('btnAplicar').onclick=applyFilters;q('btnLimpiar').onclick=clearFilters;q('filtroNivel').onchange=applyFilters;const runSearch=(type,e)=>{if(e.key==='Enter'){e.preventDefault();applyFilters();zoomToMatchedSchool(type)}};q('buscarCCT').addEventListener('keydown',e=>runSearch('cct',e));q('buscarNombre').addEventListener('keydown',e=>runSearch('nombre',e));q('buscarCCT').onchange=()=>zoomToMatchedSchool('cct');q('buscarNombre').onchange=()=>zoomToMatchedSchool('nombre');q('maintenanceFilters').onchange=()=>{setMode('mantenimiento');applyFilters()};q('toggleSchools').onchange=e=>{schoolsVisible=e.target.checked;saveState();updateVisibilityByZoom()};q('modeMaintenance').onclick=()=>setMode('mantenimiento');document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.onchange=e=>setMode(e.target.value));q('toggleMejoras').onclick=()=>toggleMenu('mejorasBody','mejorasArrow','toggleMejoras');q('toggleRiesgos').onclick=()=>toggleMenu('riesgosBody','riesgosArrow','toggleRiesgos');const clearMejoras=q('clearMejoras');if(clearMejoras)clearMejoras.onclick=clearThemeSelection;const clearRiesgos=q('clearRiesgos');if(clearRiesgos)clearRiesgos.onclick=clearThemeSelection;q('toggleSubsidencias').onchange=e=>{toggleSubsidencias(e.target.checked);saveState()};q('toggleFracturamiento').onchange=e=>{toggleFracturamiento(e.target.checked);saveState()};q('closeDetail').onclick=()=>q('detailPanel').classList.remove('open');q('toggleLegend').onclick=()=>toggleBox('legendBody','toggleLegend');q('toggleSubLegend').onclick=()=>toggleBox('subLegendBody','toggleSubLegend');q('toggleSidebar').onclick=collapseSidebar;q('showSidebar').onclick=expandSidebar;q('statsLink').onclick=saveState;map.on('zoomend',updateVisibilityByZoom)}
-function setMode(mode){activeMode=mode;q('modeMaintenance').classList.toggle('active',mode==='mantenimiento');document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.checked=r.value===mode);applyFilters();renderLegend()}
-function clearThemeSelection(){
-  activeMode='mantenimiento';
-  document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.checked=false);
-  q('modeMaintenance').classList.add('active');
+const DATA = {
+  schools: 'data/infraestructura_educativa_2026.json',
+  alcaldias: 'data/alcaldias.json',
+  subsidencias: 'data/subsidencias.json',
+  fracturamiento: 'data/fracturamiento.json',
+  mantenimiento: 'data/mantenimiento.json',
+  reforzamiento: 'data/reforzamiento.json',
+  famPotenciado: 'data/fam_potenciado_2025.json',
+  fam2026: 'data/fam_potenciado_basico_2026.json',
+  alcaldiaApoyo: 'data/beneficiadas_alcaldia_iztapalapa.json',
+  programas: 'data/programas_integradores.json'
+};
+
+const FIELDS = {
+  ccts: ['cct1', 'cct2', 'cct3', 'cct4'], alcaldia: 'alcaldia', nivel: 'principal',
+  nombre: 'inmueble', x: 'coord_x', y: 'coord_y', indice: 'Indice_Man'
+};
+const NEEDS = ['impermeabi','interior','exterior1','loseta','ventanas','ventanas1','ventanas2','puertas','escaleras','pluviales','techos','desazolve','deterioro','concreto','tinacos','cisterna','agua','agua1','hidrosanit','sanitarios','luminarias','electrica','transforma','lamina'];
+const NEED_LABELS = {impermeabi:'Impermeabilización',interior:'Pintura interior',exterior1:'Pintura exterior',loseta:'Loseta',ventanas:'Vidrios / ventanas',ventanas1:'Cancelería de aluminio / ventanas',ventanas2:'Cancelería de herrería / ventanas',puertas:'Puertas',escaleras:'Barandales, pasillos o escaleras',pluviales:'Bajadas pluviales',techos:'Muros o techos',desazolve:'Desazolve',deterioro:'Deterioro de estructura o acabados',concreto:'Concreto',tinacos:'Tinacos',cisterna:'Cisterna',agua:'Agua potable',agua1:'Red o abastecimiento de agua',hidrosanit:'Instalación hidrosanitaria',sanitarios:'Sanitarios',luminarias:'Luminarias',electrica:'Instalación eléctrica',transforma:'Transformador',lamina:'Lámina'};
+const CLASS_COLORS = {'Muy baja':'#2ca25f','Baja':'#86c98a','Media':'#f2c94c','Alta':'#f97316','Muy alta':'#dc2626'};
+const PROGRAM_COLORS = ['#0369a1','#7e22ce','#047857','#b45309','#be123c','#0f766e','#4338ca','#9f1239'];
+const IMPROVEMENTS = {
+  fam_regular: {label:'FAM Regular 2025', color:'#0f766e'},
+  programa_123_2025: {label:'1, 2, 3 por mi Escuela 2025', color:'#2563eb'},
+  fam_potenciado: {label:'FAM Potenciado 2025', color:'#ca8a04'},
+  fam_potenciado_basico_2026: {label:'FAM Potenciado + FAM Básico 2026', color:'#15803d'},
+  fam_reforzamiento: {label:'FAM Reforzamiento estructural', color:'#7c3aed'},
+  programa_123_2026: {label:'1, 2, 3 por mi Escuela 2026', color:'#0891b2'},
+  alcaldia_apoyo: {label:'Intervención de Alcaldía', color:'#be123c'},
+  ambas: {label:'Con mantenimiento y reforzamiento', color:'#111827'}
+};
+const OBS_COLORS = {obs_fractura:'#c2410c', obs_subsidencia:'#ca8a04', obs_combinada:'#b91c1c'};
+
+let allSchools = [], filteredSchools = [], programRows = [], programCatalog = [];
+let alcaldiasGeoJSON = null, subsidenciasGeoJSON = null, fracturamientoGeoJSON = null;
+let alcaldiaBoundaryLayer = null, subsidenciaLayer = null, fracturamientoLayer = null;
+let schoolsVisible = true, initialized = false;
+const schoolLayer = L.layerGroup();
+const summaryLayer = L.layerGroup();
+
+const map = L.map('map', {zoomControl:false, preferCanvas:true}).setView([19.35, -99.13], 10);
+L.control.zoom({position:'topright'}).addTo(map);
+const baseLayers = {
+  'Mapa claro': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom:20, attribution:'© OpenStreetMap © CARTO'}),
+  'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap'}),
+  'Satélite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Tiles © Esri'}),
+  'Mapa oscuro': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:20, attribution:'© OpenStreetMap © CARTO'})
+};
+baseLayers['Mapa claro'].addTo(map);
+L.control.layers(baseLayers, {}, {collapsed:true, position:'bottomright'}).addTo(map);
+schoolLayer.addTo(map);
+
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+  buildMaintenanceMenu();
+  bindUI();
+  try {
+    const [schoolGeo, alcaldias, subsidencias, fracturas, mantenimiento, reforzamiento, famPotenciado, fam2026, alcaldiaApoyo, programas] = await Promise.all([
+      fetchJson(DATA.schools), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento),
+      fetchJson(DATA.mantenimiento), fetchJson(DATA.reforzamiento), fetchJson(DATA.famPotenciado), fetchJson(DATA.fam2026),
+      fetchJson(DATA.alcaldiaApoyo), fetchJson(DATA.programas)
+    ]);
+    programRows = programas;
+    allSchools = (schoolGeo.features || []).map(normalizeFeature).filter(Boolean);
+    mergeProgramOnlySchools(allSchools, programRows);
+    joinPrograms(allSchools, programRows);
+    joinImprovements(allSchools, mantenimiento, reforzamiento, famPotenciado, fam2026, alcaldiaApoyo, programRows);
+    alcaldiasGeoJSON = alcaldias;
+    subsidenciasGeoJSON = subsidencias;
+    fracturamientoGeoJSON = fracturas;
+    buildProgramCatalog();
+    buildProgramMenu();
+    populateFilters();
+    drawBoundaries();
+    drawExtraLayers();
+    restoreState();
+    initialized = true;
+    applyFilters();
+    setStatus('');
+  } catch (error) {
+    console.error(error);
+    setStatus('No fue posible cargar la información del visor. Verifica que se publique mediante un servidor web.', true);
+  }
+}
+
+async function fetchJson(path) {
+  const response = await fetch(path, {cache:'no-store'});
+  if (!response.ok) throw new Error(`No se pudo cargar ${path}`);
+  return response.json();
+}
+
+function normalizeFeature(feature, index) {
+  const p = feature.properties || {};
+  const coords = feature.geometry?.coordinates || [];
+  return normalizeSchool(p, Number(coords[1] ?? p[FIELDS.y]), Number(coords[0] ?? p[FIELDS.x]), index, false);
+}
+
+function normalizeSchool(p, lat, lon, index, programOnly) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const needs = NEEDS.filter(field => Number(p[field]) === 1);
+  const indice = Number.isFinite(Number(p[FIELDS.indice])) ? Number(p[FIELDS.indice]) : needs.length;
+  return {
+    id: clean(p.idinmueble) || `escuela-${index}`, lat, lon, props:p,
+    nombre: clean(p[FIELDS.nombre]) || clean(p.nombre) || 'Escuela sin nombre',
+    alcaldia: normalizeAlcaldia(p[FIELDS.alcaldia] || p.alcaldia),
+    nivel: clean(p[FIELDS.nivel] || p.nivel),
+    ccts: (programOnly ? [p.cct] : FIELDS.ccts.map(field => p[field])).map(normalizeCCT).filter(Boolean),
+    indice, clasificacion: classifyIndex(indice), needs,
+    subsidenciaNivel: Number(p.subsidencia_nivel) || null,
+    subsidenciaClase: clean(p.subsidencia_clase),
+    distFractura: Number.isFinite(Number(p.dist_fractura_m)) ? Number(p.dist_fractura_m) : null,
+    programOnly, programs:[], improvements:{}, marker:null
+  };
+}
+
+function mergeProgramOnlySchools(schools, rows) {
+  const known = new Set(schools.flatMap(s => s.ccts));
+  const missing = new Map();
+  rows.forEach(row => {
+    if (!known.has(row.cct) && !missing.has(row.cct)) missing.set(row.cct, row);
+  });
+  missing.forEach((row, cct) => {
+    const props = {cct, nombre:row.nombre, inmueble:row.nombre, alcaldia:row.alcaldia, nivel:row.nivel, principal:row.nivel, domicilio:row.domicilio, localidad:row.localidad, colonia:row.colonia};
+    const school = normalizeSchool(props, Number(row.lat), Number(row.lon), `programa-${cct}`, true);
+    if (school) schools.push(school);
+  });
+}
+
+function joinPrograms(schools, rows) {
+  const index = new Map();
+  rows.forEach(row => {
+    if (!index.has(row.cct)) index.set(row.cct, []);
+    index.get(row.cct).push(row);
+  });
+  schools.forEach(school => {
+    const uniqueRows = new Map();
+    school.ccts.flatMap(cct => index.get(cct) || []).forEach(row => uniqueRows.set(`${row.cct}|${row.proyecto_id}`, row));
+    school.programs = [...uniqueRows.values()];
+  });
+}
+
+function joinImprovements(schools, maintenance, reinforcement, famPotenciado, fam2026, alcaldiaApoyo, programs) {
+  const byCct = rows => {
+    const result = new Map();
+    rows.forEach(row => { const cct = normalizeCCT(row.cct); if (cct) result.set(cct, row); });
+    return result;
+  };
+  const mm = byCct(maintenance), rr = byCct(reinforcement), fp = byCct(famPotenciado), f26 = byCct(fam2026), aa = byCct(alcaldiaApoyo);
+  const p25 = new Set(programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes('(2025)')).map(row => row.cct));
+  const p26 = new Set(programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes('(2026)')).map(row => row.cct));
+  schools.forEach(school => {
+    const first = map => school.ccts.map(cct => map.get(cct)).find(Boolean) || null;
+    const mantenimiento = first(mm);
+    const reforzamiento = first(rr);
+    school.improvementDetails = {mantenimiento, reforzamiento, famPotenciado:first(fp), fam2026:first(f26), alcaldiaApoyo:first(aa)};
+    school.improvements = {
+      fam_regular: Boolean(mantenimiento && normalize(mantenimiento.responsable).includes('ilife')),
+      programa_123_2025: school.ccts.some(cct => p25.has(cct)),
+      fam_potenciado: Boolean(school.improvementDetails.famPotenciado),
+      fam_potenciado_basico_2026: Boolean(school.improvementDetails.fam2026),
+      fam_reforzamiento: Boolean(reforzamiento),
+      programa_123_2026: school.ccts.some(cct => p26.has(cct)),
+      alcaldia_apoyo: Boolean(school.improvementDetails.alcaldiaApoyo),
+      ambas: Boolean(mantenimiento && reforzamiento)
+    };
+  });
+}
+
+function buildProgramCatalog() {
+  const map = new Map();
+  programRows.forEach(row => {
+    if (!map.has(row.proyecto_id)) map.set(row.proyecto_id, {id:row.proyecto_id, label:row.proyecto, program:row.programa, count:0});
+    map.get(row.proyecto_id).count += 1;
+  });
+  programCatalog = [...map.values()].sort((a,b) => a.program.localeCompare(b.program, 'es') || a.label.localeCompare(b.label, 'es'));
+}
+
+function buildProgramMenu() {
+  const groups = new Map();
+  programCatalog.forEach(item => {
+    if (!groups.has(item.program)) groups.set(item.program, []);
+    groups.get(item.program).push(item);
+  });
+  q('programFilters').innerHTML = [...groups.entries()].map(([program, projects], index) => `
+    <details class="program-group" ${index < 2 ? 'open' : ''}>
+      <summary><span>${escapeHtml(program)}</span><small>${projects.length} proyecto${projects.length === 1 ? '' : 's'}</small></summary>
+      <div>${projects.map(project => `<label class="inline-check program-option" data-search="${escapeAttr(normalize(`${program} ${project.label}`))}"><input type="checkbox" value="${escapeAttr(project.id)}"><span>${escapeHtml(project.label)} <em>${project.count.toLocaleString('es-MX')} CCT</em></span></label>`).join('')}</div>
+    </details>`).join('');
+  q('programFilters').addEventListener('change', applyFilters);
+}
+
+function buildMaintenanceMenu() {
+  q('maintenanceFilters').innerHTML = NEEDS.map(field => `<label><input type="checkbox" value="${field}"><span>${NEED_LABELS[field]}</span></label>`).join('');
+}
+
+function bindUI() {
+  q('filtroAlcaldia').addEventListener('change', () => { applyFilters(); zoomToAlcaldia(); });
+  q('filtroNivel').addEventListener('change', applyFilters);
+  q('buscarCCT').addEventListener('input', debounce(() => { applyFilters(); zoomToMatch('cct'); }, 180));
+  q('buscarNombre').addEventListener('input', debounce(() => { applyFilters(); zoomToMatch('nombre'); }, 180));
+  q('maintenanceFilters').addEventListener('change', applyFilters);
+  q('improvementFilters').addEventListener('change', applyFilters);
+  document.querySelectorAll('input[name="riskMode"]').forEach(input => input.addEventListener('change', applyFilters));
+  q('selectAllMaintenance').onclick = () => setChecks('#maintenanceFilters input', true);
+  q('clearMaintenance').onclick = () => setChecks('#maintenanceFilters input', false);
+  q('selectAllMejoras').onclick = () => setChecks('#improvementFilters input', true);
+  q('clearMejoras').onclick = () => setChecks('#improvementFilters input', false);
+  q('selectAllProgramas').onclick = () => setChecks('#programFilters input', true);
+  q('clearProgramas').onclick = () => setChecks('#programFilters input', false);
+  q('clearRiesgos').onclick = () => { document.querySelectorAll('input[name="riskMode"]').forEach(i => i.checked = false); applyFilters(); };
+  q('btnLimpiar').onclick = clearAllFilters;
+  q('modeMaintenance').onclick = () => { clearThematicSelections(); applyFilters(); };
+  q('toggleSchools').onchange = event => { schoolsVisible = event.target.checked; saveState(); updateVisibility(); };
+  q('toggleSubsidencias').onchange = event => { toggleLayer(subsidenciaLayer, event.target.checked); q('subsidenciaLegend').classList.toggle('hidden', !event.target.checked); saveState(); };
+  q('toggleFracturamiento').onchange = event => { toggleLayer(fracturamientoLayer, event.target.checked); saveState(); };
+  q('programSearch').addEventListener('input', filterProgramMenu);
+  q('toggleMejoras').onclick = () => toggleMenu('mejorasBody','mejorasArrow','toggleMejoras');
+  q('toggleProgramas').onclick = () => toggleMenu('programasBody','programasArrow','toggleProgramas');
+  q('toggleRiesgos').onclick = () => toggleMenu('riesgosBody','riesgosArrow','toggleRiesgos');
+  q('toggleSidebar').onclick = collapseSidebar;
+  q('showSidebar').onclick = expandSidebar;
+  q('closeDetail').onclick = () => q('detailPanel').classList.remove('open');
+  q('toggleLegend').onclick = () => toggleBox('legendBody','toggleLegend');
+  q('toggleSubLegend').onclick = () => toggleBox('subLegendBody','toggleSubLegend');
+  q('statsLink').onclick = saveState;
+  map.on('zoomend moveend', updateVisibility);
+}
+
+function setChecks(selector, checked) {
+  document.querySelectorAll(selector).forEach(input => { input.checked = checked; });
   applyFilters();
-  renderLegend();
 }
-function applyFilters(){const n=q('filtroNivel').value,c=q('buscarCCT').value.trim().toLowerCase(),name=q('buscarNombre').value.trim().toLowerCase(),needs=selectedNeeds();filteredSchools=allSchools.filter(s=>{if(n&&s.nivel!==n)return false;if(c&&!s.ccts.some(v=>v.toLowerCase().includes(c)))return false;if(name&&!s.nombre.toLowerCase().includes(name))return false;if(needs.length&&!needs.every(f=>s.needs.includes(f)))return false;if(activeMode==='fam_regular'&&!(s.mantenimiento&&isILIFE(s.mantenimiento)))return false;if(activeMode==='programa_123'&&!(s.mantenimiento&&isDGCOP(s.mantenimiento)))return false;if(activeMode==='fam_potenciado'&&!s.famPotenciado)return false;if(activeMode==='fam_potenciado_basico_2026'&&!s.famPotenciadoBasico2026)return false;if(activeMode==='fam_reforzamiento'&&!s.reforzamiento)return false;if(activeMode==='programa_123_2026'&&!s.programa123_2026)return false;if(activeMode==='alcaldia_apoyo'&&!s.alcaldiaApoyo)return false;if(activeMode==='ambas'&&!(s.mantenimiento&&s.reforzamiento))return false;if(activeMode==='obs_fractura'&&!hasFractureObservation(s))return false;if(activeMode==='obs_subsidencia'&&!hasSubsidenceObservation(s))return false;if(activeMode==='obs_combinada'&&!(hasFractureObservation(s)&&hasSubsidenceObservation(s)))return false;return true});saveState();updateMap()}
-function clearFilters(){q('filtroNivel').value='';q('buscarCCT').value='';q('buscarNombre').value='';document.querySelectorAll('#maintenanceFilters input').forEach(i=>i.checked=false);activeMode='mantenimiento';document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.checked=false);q('modeMaintenance').classList.add('active');filteredSchools=[...allSchools];saveState();updateMap();if(filteredSchools.length)fitToSchools(filteredSchools,12)}
-function updateMap(){drawSchools();updateStats();renderLegend();updateVisibilityByZoom()}
-function drawSchools(){schoolLayer.clearLayers();allSchools.forEach(s=>s.marker=null);filteredSchools.forEach(s=>{const hasSupport=hasAnySupport(s);const marker=L.circleMarker([s.lat,s.lon],{radius:7,color:borderForSchool(s),weight:hasSupport?2.4:1.3,fillColor:colorForSchool(s),fillOpacity:.92});s.marker=marker;marker.bindPopup(buildPopup(s),{maxWidth:330});marker.on('click',()=>openDetail(s));schoolLayer.addLayer(marker)});if(filteredSchools.length&&!map._initialFitDone){fitToSchools(filteredSchools,12);map._initialFitDone=true}}
-function colorForSchool(s){if(activeMode==='obs_fractura')return s.reforzamiento?OBS_COLORS.reforzada:OBS_COLORS.fractura;if(activeMode==='obs_subsidencia')return s.reforzamiento?OBS_COLORS.reforzada:OBS_COLORS.subsidencia;if(activeMode==='obs_combinada')return s.reforzamiento?OBS_COLORS.reforzada:OBS_COLORS.combinada;if(activeMode==='fam_regular')return '#0f766e';if(activeMode==='programa_123')return '#2563eb';if(activeMode==='fam_potenciado')return '#ca8a04';if(activeMode==='fam_potenciado_basico_2026')return '#15803d';if(activeMode==='fam_reforzamiento')return '#7c3aed';if(activeMode==='programa_123_2026')return '#0891b2';if(activeMode==='alcaldia_apoyo')return '#be123c';if(activeMode==='ambas')return '#111827';return COLORS[s.clasificacion]}
-function borderForSchool(s){if(s.mantenimiento&&s.reforzamiento)return '#111827';if(s.reforzamiento)return '#7c3aed';if(s.famPotenciadoBasico2026)return '#15803d';if(s.alcaldiaApoyo)return '#be123c';if(s.programa123_2026)return '#0891b2';if(s.famPotenciado)return '#ca8a04';if(s.mantenimiento)return isILIFE(s.mantenimiento)?'#0f766e':'#2563eb';return '#fff'}
-function buildPopup(s){const support=matchingSupportFields(s);return `<div class="popup-title">${escapeHtml(s.nombre)}</div><div class="popup-meta">CCT: ${escapeHtml(s.ccts.join(', ')||'No registrado')}<br>Alcaldía: ${escapeHtml(s.alcaldia||'No registrada')}<br>${activeMetricLine(s)}</div><div class="popup-flags">${s.mantenimiento&&isILIFE(s.mantenimiento)?'<span class="mini-tag teal">FAM Regular 2025</span>':''}${s.mantenimiento&&isDGCOP(s.mantenimiento)?'<span class="mini-tag blue">1, 2, 3 por mi Escuela</span>':''}${s.famPotenciado?'<span class="mini-tag gold">FAM Potenciado 2025</span>':''}${s.famPotenciadoBasico2026?'<span class="mini-tag teal">FAM Potenciado + FAM Básico 2026</span>':''}${s.reforzamiento?'<span class="mini-tag purple">FAM Reforzamiento estructural</span>':''}${s.programa123_2026?'<span class="mini-tag blue">1, 2, 3 por mi Escuela 2026</span>':''}${s.alcaldiaApoyo?'<span class="mini-tag warning">Alcaldía</span>':''}${support.length?'<span class="mini-tag warning">✓ Apoyo previo</span>':''}</div>`}
-function activeMetricLine(s){if(activeMode.startsWith('obs_'))return `Observación: <strong>${escapeHtml(observationText(s))}</strong>`;return `Atenciones de revisión registradas: <strong>${s.indice}</strong>${activeMode==='mantenimiento'?` (${s.clasificacion})`:''}`}
-function openDetail(s){q('detailPanel').classList.add('open');q('detailTitle').textContent=s.nombre;const support=matchingSupportFields(s);const needs=s.needs.map(f=>{const match=support.some(x=>x.field===f);return `<li class="${match?'need-with-support':''}"><span>${escapeHtml(MAINTENANCE_LABELS[f])}</span>${match?'<span class="support-signal">✓ Apoyo previo</span>':''}</li>`}).join('')||'<li>No se registraron atenciones de revisión de las variables seleccionadas.</li>';const supportSignal=support.length?'<div class="support-warning compact-support"><strong>✓ Apoyo previo</strong></div>':'';const famRegular=s.mantenimiento&&isILIFE(s.mantenimiento)?supportCard('FAM Regular 2025',s.mantenimiento,'teal-card'):'';const programa123=s.mantenimiento&&isDGCOP(s.mantenimiento)?supportCard('1, 2, 3 por mi Escuela',s.mantenimiento,'blue-card'):'';const famPot=s.famPotenciado?`<div class="info-card gold-card"><h3>FAM Potenciado 2025</h3><dl>${detailRow('Código',s.famPotenciado.codigo)}${detailRow('Monto / registro',s.famPotenciado.fam_potenciado_2025)}${detailRow('Colonia',s.famPotenciado.colonia)}</dl></div>`:'';const famPotBasico2026=s.famPotenciadoBasico2026?`<div class="info-card teal-card"><h3>FAM Potenciado + FAM Básico 2026</h3><dl>${detailRow('Código',s.famPotenciadoBasico2026.codigo)}${detailRow('Alcaldía',s.famPotenciadoBasico2026.alcaldia)}${detailRow('Colonia',s.famPotenciadoBasico2026.colonia)}${detailRow('Dirección',s.famPotenciadoBasico2026.direccion)}${detailRow('Nivel',s.famPotenciadoBasico2026.nivel)}</dl></div>`:'';const ref=s.reforzamiento?`<div class="info-card purple-card"><h3>FAM Reforzamiento estructural</h3><dl>${detailRow('Código',s.reforzamiento.codigo)}${detailRow('Intervención',s.reforzamiento.intervencion)}${detailRow('Dirección',s.reforzamiento.direccion)}</dl></div>`:'';const programa2026=s.programa123_2026?`<div class="info-card blue-card"><h3>1, 2, 3 por mi Escuela 2026</h3><dl>${detailRow('Alcaldía',s.programa123_2026.alcaldia)}${detailRow('Colonia',s.programa123_2026.colonia)}${detailRow('Dirección',s.programa123_2026.direccion)}${detailRow('Nivel',s.programa123_2026.nivel)}${detailRow('AEFCM',s.programa123_2026.aefcm)}${detailRow('SECTEI',s.programa123_2026.sectei)}${detailRow('SOBSE',s.programa123_2026.sobse)}</dl></div>`:'';const alcaldiaCard=s.alcaldiaApoyo?`<div class="info-card"><h3>Alcaldía</h3><dl>${detailRow('Territorial',s.alcaldiaApoyo.territorial)}${detailRow('Nivel',s.alcaldiaApoyo.nivel)}${detailRow('Domicilio',s.alcaldiaApoyo.domicilio)}${detailRow('Colonia',s.alcaldiaApoyo.colonia)}${detailRow('Región',s.alcaldiaApoyo.region)}</dl></div>`:'';const improvements=famRegular+programa123+famPot+famPotBasico2026+ref+programa2026+alcaldiaCard||'<p class="muted-box">No tiene apoyos registrados en las bases incorporadas.</p>';q('detailContent').innerHTML=`<div class="detail-tabs"><button class="tab-btn active" data-tab="general">General</button><button class="tab-btn" data-tab="mantenimiento">Mantenimiento</button><button class="tab-btn" data-tab="mejoras">Mejoras</button><button class="tab-btn" data-tab="riesgos">Observaciones</button></div><div class="tab-pane active" data-pane="general"><dl>${detailRow('CCT',s.ccts.join(', '))}${detailRow('Alcaldía',s.alcaldia)}${detailRow('Nivel',s.nivel)}${detailRow('Domicilio',s.props.bm_domicilio_principal||s.props.coord_DOMICILIO)}${detailRow('Localidad / colonia',s.props.bm_localidad||s.props.coord_colonia||s.props.coord_LOCALIDAD)}${detailRow('Dirección general',s.props.bm_direccion_general||s.props.coord_DIRECCION_GENERAL)}${detailRow('Coordinación',s.props.bm_coordinacion||s.props.coordinaci)}${detailRow('Dirección operativa',s.props.bm_direccion_operativa||s.props.operativa)}${detailRow('Estudiantes del inmueble (911)',s.props['bm_ESTUDIANTES 911_INMUEBLE'])}${detailRow('Personal total del inmueble (911)',s.props['bm_TOTAL PERSONAL 911_INMUEBLE'])}${detailRow('Fuente de coordenadas',s.props.fuente_coordenadas)}${detailRow('Registro de mantenimiento',s.props.tiene_registro_mantenimiento)}<dt>Atención de Revisión</dt><dd>${s.indice}</dd><dt>Atención de Revisión</dt><dd><span class="badge ${classSlug(s.clasificacion)}">${s.clasificacion}</span></dd></dl></div><div class="tab-pane" data-pane="mantenimiento"><p>${maintenanceSummary(s)}</p>${supportSignal}<ul class="need-list">${needs}</ul></div><div class="tab-pane" data-pane="mejoras">${improvements}</div><div class="tab-pane" data-pane="riesgos">${riskDetail(s)}</div>`;activateDetailTabs()}
-function supportCard(title,data,cardClass){return `<div class="info-card ${cardClass}"><h3>${escapeHtml(title)}</h3><dl>${detailRow('Estado',data.estado)}${detailRow('Avance',data.avance)}${detailRow('Responsable',data.responsable)}${detailRow('Modalidad',data.modalidad)}</dl>${cleanText(data.trabajos_finales)?`<p><strong>Trabajos finales:</strong><br>${formatMultiline(data.trabajos_finales)}</p>`:''}</div>`}
-function activateDetailTabs(){
-  const root=q('detailContent');
-  if(!root)return;
-  const buttons=root.querySelectorAll('.tab-btn');
-  const panes=root.querySelectorAll('.tab-pane');
-  buttons.forEach(button=>{
-    button.addEventListener('click',()=>{
-      const target=button.dataset.tab;
-      buttons.forEach(b=>b.classList.toggle('active',b===button));
-      panes.forEach(p=>p.classList.toggle('active',p.dataset.pane===target));
-    });
-  });
+
+function clearThematicSelections() {
+  document.querySelectorAll('#maintenanceFilters input,#improvementFilters input,#programFilters input,input[name="riskMode"]').forEach(input => { input.checked = false; });
 }
-function detailRow(label,value){const v=cleanText(value);return v?`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(v)}</dd>`:''}
-function riskDetail(s){const rows=[];if(hasFractureObservation(s))rows.push(`<div class="observation-card"><strong>Revisión por cercanía a fracturamiento</strong><p>La escuela se encuentra aproximadamente a ${Math.round(s.distFractura).toLocaleString('es-MX')} m del fracturamiento más cercano. Se recomienda una revisión técnica del inmueble y seguimiento de posibles afectaciones.</p></div>`);if(hasSubsidenceObservation(s))rows.push(`<div class="observation-card"><strong>Seguimiento por subsidencia</strong><p>La escuela se localiza en una zona clasificada con subsidencia ${escapeHtml(s.subsidenciaClase.toLowerCase())}. Se recomienda observar asentamientos diferenciales, grietas y cambios en elementos constructivos.</p></div>`);if(s.reforzamiento)rows.push(`<div class="observation-card reinforced"><strong>Reforzamiento estructural registrado</strong><p>La escuela cuenta con una intervención estructural registrada. Esta condición se considera como antecedente de atención, pero se recomienda conservar el seguimiento técnico.</p></div>`);if(!rows.length)rows.push('<p class="muted-box">No se identificó una observación territorial con los criterios actuales.</p>');return rows.join('')}
-function updateStats(){
-  const s=filteredSchools;
-  const total=s.length;
-  const base=allSchools.filter(passesGeneralFilters);
-  let title='Resumen visible';
-  let items;
 
-  if(activeMode==='mantenimiento'){
-    const selected=selectedNeeds();
-    if(selected.length){
-      title='Atención de Revisión seleccionada';
-      items=[
-        [total,'Escuelas con la selección'],
-        [total?Math.max(...s.map(x=>x.indice)):0,'Mayor Atención de Revisión'],
-        [`${pct(total,base.length)}%`,'De escuelas filtradas'],
-        [selected.length,'Variables activas']
-      ];
-    }else{
-      items=[
-        [total,'Escuelas'],
-        [total?Math.max(...s.map(x=>x.indice)):0,'Mayor Atención de Revisión'],
-        [s.filter(x=>x.indice>=15).length,'Con 15 o más'],
-        [unique(s.map(x=>x.alcaldia)).length,'Alcaldías']
-      ];
-    }
-  }else if(activeMode==='fam_regular'){
-    title='FAM Regular 2025';
-    items=[[total,'Escuelas'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[total?Math.max(...s.map(x=>x.indice)):0,'Mayor Atención de Revisión'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='programa_123'){
-    title='1, 2, 3 por mi Escuela';
-    items=[[total,'Escuelas'],[s.filter(x=>parseFloat(String(x.mantenimiento?.avance||'0').replace('%',''))>=100).length,'100% de avance'],[unique(s.map(x=>normalizeText(x.mantenimiento?.responsable))).length,'Responsables'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='fam_potenciado'){
-    title='FAM Potenciado 2025';
-    items=[[total,'Escuelas'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[unique(s.map(x=>x.nivel)).length,'Niveles'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='fam_reforzamiento'){
-    title='FAM Reforzamiento estructural';
-    items=[[total,'Escuelas'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[unique(s.map(x=>x.nivel)).length,'Niveles'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='programa_123_2026'){
-    title='1, 2, 3 por mi Escuela 2026';
-    items=[[total,'Escuelas'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[unique(s.map(x=>x.nivel)).length,'Niveles'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='alcaldia_apoyo'){
-    title='Alcaldía';
-    items=[[total,'Escuelas'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[unique(s.map(x=>x.nivel)).length,'Niveles'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else if(activeMode==='ambas'){
-    title='Escuelas con ambas mejoras';
-    items=[[total,'Escuelas'],[total?Math.max(...s.map(x=>x.indice)):0,'Mayor Atención de Revisión'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }else{
-    title=modeTitle(activeMode);
-    items=[[total,'Escuelas observadas'],[s.filter(x=>x.reforzamiento).length,'Con reforzamiento'],[unique(s.map(x=>x.alcaldia)).length,'Alcaldías'],[`${pct(total,base.length)}%`,'De escuelas filtradas']];
-  }
-
-  q('summaryTitle').textContent=title;
-  items.forEach((it,i)=>{
-    q(`kpi${i+1}`).textContent=it[0];
-    q(`kpiLabel${i+1}`).textContent=it[1];
-  });
+function clearAllFilters() {
+  q('filtroAlcaldia').value = '';
+  q('filtroNivel').value = '';
+  q('buscarCCT').value = '';
+  q('buscarNombre').value = '';
+  q('programSearch').value = '';
+  clearThematicSelections();
+  filterProgramMenu();
+  applyFilters();
+  if (alcaldiaBoundaryLayer) map.fitBounds(alcaldiaBoundaryLayer.getBounds(), {padding:[15,15]});
 }
-function passesGeneralFilters(s){const n=q('filtroNivel').value,c=q('buscarCCT').value.trim().toLowerCase(),name=q('buscarNombre').value.trim().toLowerCase();return(!n||s.nivel===n)&&(!c||s.ccts.some(v=>v.toLowerCase().includes(c)))&&(!name||s.nombre.toLowerCase().includes(name))}
-function renderLegend(){
-  let title='Atención de Revisión Diagnóstico';
-  let rows=classificationRows();
 
-  if(activeMode==='fam_regular'){
-    title='FAM Regular 2025';
-    rows=[['#0f766e','Escuela beneficiada']];
-  }else if(activeMode==='programa_123'){
-    title='1, 2, 3 por mi Escuela';
-    rows=[['#2563eb','Escuela beneficiada']];
-  }else if(activeMode==='fam_potenciado'){
-    title='FAM Potenciado 2025';
-    rows=[['#ca8a04','Escuela beneficiada']];
-  }else if(activeMode==='fam_reforzamiento'){
-    title='FAM Reforzamiento estructural';
-    rows=[['#7c3aed','Escuela intervenida']];
-  }else if(activeMode==='programa_123_2026'){
-    title='1, 2, 3 por mi Escuela 2026';
-    rows=[['#0891b2','Escuela beneficiada']];
-  }else if(activeMode==='alcaldia_apoyo'){
-    title='Alcaldía';
-    rows=[['#be123c','Escuela beneficiada']];
-  }else if(activeMode==='ambas'){
-    title='Ambas mejoras';
-    rows=[['#111827','Mantenimiento y reforzamiento']];
-  }else if(activeMode==='obs_fractura'){
-    title='Revisión por fracturamiento';
-    rows=[[OBS_COLORS.fractura,'Requiere revisión'],[OBS_COLORS.reforzada,'Con reforzamiento registrado']];
-  }else if(activeMode==='obs_subsidencia'){
-    title='Seguimiento por subsidencia';
-    rows=[[OBS_COLORS.subsidencia,'Requiere seguimiento'],[OBS_COLORS.reforzada,'Con reforzamiento registrado']];
-  }else if(activeMode==='obs_combinada'){
-    title='Observación combinada';
-    rows=[[OBS_COLORS.combinada,'Fracturamiento y subsidencia'],[OBS_COLORS.reforzada,'Con reforzamiento registrado']];
-  }
+function applyFilters() {
+  if (!initialized) return;
+  const alcaldia = q('filtroAlcaldia').value;
+  const nivel = q('filtroNivel').value;
+  const cct = normalizeCCT(q('buscarCCT').value);
+  const nombre = normalize(q('buscarNombre').value);
+  const needs = checkedValues('#maintenanceFilters input');
+  const improvements = checkedValues('#improvementFilters input');
+  const projects = checkedValues('#programFilters input');
+  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
 
-  q('legendTitle').textContent=title;
-  q('legendBody').innerHTML=rows.map(([c,l])=>`<div><span class="swatch" style="background:${c}"></span>${l}</div>`).join('');
-}
-function classificationRows(){return[['#2ca25f','Muy baja'],['#a1d99b','Baja'],['#ffd166','Media'],['#f97316','Alta'],['#dc2626','Muy alta']]}
-function drawBoundaries(){if(alcaldiasGeoJSON)alcaldiaBoundaryLayer=L.geoJSON(alcaldiasGeoJSON,{style:{color:'#1f4e79',weight:1,fillOpacity:0,opacity:.55}}).addTo(map);if(agebsGeoJSON)agebBoundaryLayer=L.geoJSON(agebsGeoJSON,{style:{color:'#64748b',weight:.5,fillOpacity:0,opacity:.25}})}
-function updateVisibilityByZoom(){if(schoolsVisible){if(!map.hasLayer(schoolLayer))schoolLayer.addTo(map)}else if(map.hasLayer(schoolLayer))map.removeLayer(schoolLayer)}
-function drawExtraLayers(){if(subsidenciasGeoJSON)subsidenciaLayer=L.geoJSON(subsidenciasGeoJSON,{style:styleSubsidencia,onEachFeature:(f,l)=>{const code=Number(f.properties?.gridcode);l.bindPopup(`<div class="popup-title">Subsidencia</div><div class="popup-meta">Clasificación: <strong>${subClass(code)}</strong></div>`)}});if(fracturamientoGeoJSON)fracturamientoLayer=L.geoJSON(fracturamientoGeoJSON,{style:fractureStyle(false),onEachFeature:onEachFracture})}
-function toggleSubsidencias(on){if(!subsidenciaLayer)return;if(on){subsidenciaLayer.addTo(map);q('subsidenciaLegend').classList.remove('hidden')}else{map.removeLayer(subsidenciaLayer);q('subsidenciaLegend').classList.add('hidden')}}
-function toggleFracturamiento(on){if(!fracturamientoLayer)return;if(on)fracturamientoLayer.addTo(map);else map.removeLayer(fracturamientoLayer)}
-function styleSubsidencia(f){const c=Number(f.properties?.gridcode);return{color:'#fff',weight:.3,opacity:.7,fillColor:COLORS[subClass(c)]||'#64748b',fillOpacity:.48}}
-function subClass(c){return({1:'Muy baja',2:'Baja',3:'Media',4:'Alta',5:'Muy alta'})[c]||'No clasificada'}
-function fractureStyle(selected){return{color:selected?'#0f172a':'#7c2d12',weight:selected?4:2.2,opacity:selected?1:.8}}
-function onEachFracture(f,l){const p=f.properties||{},len=Number(p.MAGNI_NUM||p.Shape_Leng||0);l.bindTooltip(len?`Longitud: ${len.toFixed(1)} m`:'Fracturamiento',{sticky:true,className:'fracture-tooltip'});l.on('click',()=>{if(selectedFractureLayer&&selectedFractureLayer!==l)selectedFractureLayer.setStyle(fractureStyle(false));selectedFractureLayer=l;l.setStyle(fractureStyle(true));l.bindPopup(`<div class="popup-title">Fracturamiento</div><div class="popup-meta">Tipo: <strong>${escapeHtml(p.TIPO||'No registrado')}</strong><br>Longitud: <strong>${len?len.toFixed(1)+' m':'No registrada'}</strong></div>`).openPopup()})}
-function populateFilters(){
-
-  // Unificar también el valor guardado en cada escuela para que los filtros coincidan.
-  allSchools.forEach(s=>{
-    s.alcaldia=normalizeAlcaldia(s.alcaldia);
+  filteredSchools = allSchools.filter(school => {
+    if (alcaldia && school.alcaldia !== alcaldia) return false;
+    if (nivel && school.nivel !== nivel) return false;
+    if (cct && !school.ccts.some(value => value.includes(cct))) return false;
+    if (nombre && !normalize(school.nombre).includes(nombre)) return false;
+    if (school.programOnly && projects.length === 0) return false;
+    if (needs.length && !needs.every(field => school.needs.includes(field))) return false;
+    if (improvements.length && !improvements.some(key => school.improvements[key])) return false;
+    if (projects.length && !school.programs.some(row => projects.includes(row.proyecto_id))) return false;
+    if (risk === 'obs_fractura' && !hasFracture(school)) return false;
+    if (risk === 'obs_subsidencia' && !hasSubsidence(school)) return false;
+    if (risk === 'obs_combinada' && !(hasFracture(school) && hasSubsidence(school))) return false;
+    return true;
   });
 
-  fillSelect('filtroNivel',unique(allSchools.map(s=>s.nivel)));
-  q('listaCCT').innerHTML=unique(allSchools.flatMap(s=>s.ccts))
-    .map(v=>`<option value="${escapeHtml(v)}"></option>`).join('');
-  q('listaNombres').innerHTML=unique(allSchools.map(s=>s.nombre))
-    .map(v=>`<option value="${escapeHtml(v)}"></option>`).join('');
-}
-function fillSelect(id,vals){const el=q(id),first=el.querySelector('option').outerHTML;el.innerHTML=first+vals.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}
-
-function resetSelectionsForSchoolSearch(){
-  activeMode='mantenimiento';
-  document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.checked=false);
-  const modeMaintenance=q('modeMaintenance');
-  if(modeMaintenance)modeMaintenance.classList.add('active');
-
-  const nivel=q('filtroNivel');
-  if(nivel)nivel.value='';
-
-  document.querySelectorAll('#maintenanceFilters input').forEach(i=>i.checked=false);
-
-  schoolsVisible=true;
-  const toggle=q('toggleSchools');
-  if(toggle)toggle.checked=true;
-
-  const detail=q('detailPanel');
-  if(detail)detail.classList.remove('open');
-}
-
-function zoomToMatchedSchool(type){
-  const input=q(type==='cct'?'buscarCCT':'buscarNombre');
-  const raw=input?input.value.trim():'';
-  if(!raw)return;
-
-  const value=raw.toLowerCase();
-  let school=allSchools.find(s=>
-    type==='cct'
-      ? s.ccts.some(c=>c.toLowerCase()===value)
-      : s.nombre.toLowerCase()===value
-  );
-
-  if(!school){
-    school=allSchools.find(s=>
-      type==='cct'
-        ? s.ccts.some(c=>c.toLowerCase().includes(value))
-        : s.nombre.toLowerCase().includes(value)
-    );
-  }
-
-  if(!school)return;
-
-  resetSelectionsForSchoolSearch();
-
-  // Se conserva únicamente el texto de búsqueda utilizado.
-  if(type==='cct'){
-    q('buscarNombre').value='';
-    q('buscarCCT').value=school.ccts.find(c=>c.toLowerCase().includes(value))||raw;
-  }else{
-    q('buscarCCT').value='';
-    q('buscarNombre').value=school.nombre;
-  }
-
-  // Volver a mostrar todas las escuelas y reconstruir marcadores sin filtros anteriores.
-  filteredSchools=[...allSchools];
+  q('programSelectionCount').textContent = projects.length;
+  q('modeMaintenance').classList.toggle('active', !improvements.length && !projects.length && !risk);
+  updateCrossSummary(needs, improvements, projects, risk);
   saveState();
   updateMap();
-
-  map.setView([school.lat,school.lon],17,{animate:true});
-
-  setTimeout(()=>{
-    updateVisibilityByZoom();
-    const marker=school.marker;
-    if(marker){
-      marker.openPopup();
-      openDetail(school);
-    }else{
-      openDetail(school);
-    }
-  },450);
-}
-function fitToSchools(ss,maxZoom=14){if(!ss.length)return;if(ss.length===1){map.setView([ss[0].lat,ss[0].lon],Math.min(maxZoom,17),{animate:true});return}map.fitBounds(L.latLngBounds(ss.map(s=>[s.lat,s.lon])),{padding:[45,45],maxZoom,animate:true})}
-function toggleMenu(body,arrow,button){const open=q(body).classList.contains('hidden');q(body).classList.toggle('hidden',!open);q(arrow).textContent=open?'⌄':'›';q(button).setAttribute('aria-expanded',String(open))}
-function toggleBox(body,button){const b=q(body),hidden=b.style.display==='none';b.style.display=hidden?'block':'none';q(button).textContent=hidden?'−':'+'}
-function collapseSidebar(){q('layout').classList.add('sidebar-collapsed');q('showSidebar').classList.remove('hidden');setTimeout(()=>map.invalidateSize(),220)}
-function expandSidebar(){q('layout').classList.remove('sidebar-collapsed');q('showSidebar').classList.add('hidden');setTimeout(()=>map.invalidateSize(),220)}
-function normalizeSearchText(v){return cleanText(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim()}
-function matchingSupportFields(s){const out=[];const mantText=normalizeSearchText(`${s.mantenimiento?.trabajos_finales||''} ${s.mantenimiento?.trabajos_solicitados||''}`);s.needs.forEach(field=>{const words=SUPPORT_KEYWORDS[field]||[];const matched=mantText&&words.some(w=>mantText.includes(normalizeSearchText(w)));if(matched)out.push({field});else if(s.reforzamiento&&STRUCTURAL_RELATED_FIELDS.has(field))out.push({field})});return out}
-function isILIFE(data){return normalizeSearchText(data?.responsable).includes('ilife')}
-function isDGCOP(data){return normalizeSearchText(data?.responsable).includes('dgcop')}
-function hasAnySupport(s){return !!(s.mantenimiento||s.famPotenciado||s.reforzamiento||s.programa123_2026||s.alcaldiaApoyo||s.famPotenciadoBasico2026)}
-function maintenanceSummary(s){return `La escuela registra ${s.indice} atenciones de revisión diagnóstico de las variables consideradas. El mayor número de necesidades dentro de la selección visible se utiliza como referencia comparativa.`}
-function hasFractureObservation(s){return s.distFractura!==null&&s.distFractura<=250}
-function hasSubsidenceObservation(s){return s.subsidenciaNivel!==null&&s.subsidenciaNivel>=4}
-function observationText(s){const f=hasFractureObservation(s),sub=hasSubsidenceObservation(s);if(f&&sub)return s.reforzamiento?'Observación combinada con reforzamiento estructural registrado':'Revisión integral por fracturamiento y subsidencia';if(f)return s.reforzamiento?'Cercanía a fracturamiento con reforzamiento registrado':'Revisión por cercanía a fracturamiento';if(sub)return s.reforzamiento?'Subsidencia alta con reforzamiento registrado':'Seguimiento por subsidencia alta';return'No se identificó observación territorial con los criterios actuales'}
-function modeTitle(mode){return({obs_fractura:'Revisión por cercanía a fracturamiento',obs_subsidencia:'Seguimiento por subsidencia alta',obs_combinada:'Observación territorial combinada'})[mode]||'Observaciones territoriales'}
-function selectedNeeds(){return[...document.querySelectorAll('#maintenanceFilters input:checked')].map(i=>i.value)}
-function saveState(){const state={mode:activeMode,nivel:q('filtroNivel')?.value||'',cct:q('buscarCCT')?.value||'',nombre:q('buscarNombre')?.value||'',needs:selectedNeeds(),schoolsVisible,subsidencias:q('toggleSubsidencias')?.checked||false,fracturamiento:q('toggleFracturamiento')?.checked||false};localStorage.setItem('infraViewerState:Xochimilco',JSON.stringify(state))}
-function restoreState(){try{const st=JSON.parse(localStorage.getItem('infraViewerState:Xochimilco')||'null');if(!st)return;q('filtroNivel').value=st.nivel||'';q('buscarCCT').value=st.cct||'';q('buscarNombre').value=st.nombre||'';document.querySelectorAll('#maintenanceFilters input').forEach(i=>i.checked=(st.needs||[]).includes(i.value));schoolsVisible=st.schoolsVisible!==false;q('toggleSchools').checked=schoolsVisible;q('toggleSubsidencias').checked=!!st.subsidencias;q('toggleFracturamiento').checked=!!st.fracturamiento;activeMode=st.mode||'mantenimiento';q('modeMaintenance').classList.toggle('active',activeMode==='mantenimiento');document.querySelectorAll('input[name="themeMode"]').forEach(r=>r.checked=r.value===activeMode);toggleSubsidencias(!!st.subsidencias);toggleFracturamiento(!!st.fracturamiento);applyFilters()}catch{}}
-function pointInFeature(p,f){const g=f.geometry;if(!g)return false;if(g.type==='Polygon')return pointInPolygon(p,g.coordinates);if(g.type==='MultiPolygon')return g.coordinates.some(x=>pointInPolygon(p,x));return false}
-function pointInPolygon(p,poly){if(!pointInRing(p,poly[0]))return false;for(let i=1;i<poly.length;i++)if(pointInRing(p,poly[i]))return false;return true}
-function pointInRing([x,y],r){let inside=false;for(let i=0,j=r.length-1;i<r.length;j=i++){const [xi,yi]=r[i],[xj,yj]=r[j];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/((yj-yi)||1e-12)+xi))inside=!inside}return inside}
-function getFeatureCenter(f){const c=[];collectCoords(f.geometry.coordinates,c);return[avg(c.map(x=>x[1])),avg(c.map(x=>x[0]))]}
-function collectCoords(o,out){if(typeof o[0]==='number')out.push(o);else o.forEach(x=>collectCoords(x,out))}
-function getAreaName(f,fb){const p=f.properties||{};for(const k of ['alcaldia','NOMGEO','NOM_ALC','NOMBRE','nombre','CVEGEO','CVE_AGEB'])if(cleanText(p[k]))return cleanText(p[k]);return fb}
-function classifyIndex(v){return v<=6?'Muy baja':v<=10?'Baja':v<=14?'Media':v<=18?'Alta':'Muy alta'}
-function classSlug(s){return cleanText(s).toLowerCase().replace(/\s+/g,'-')}
-function toBinary(v){return Number(v)===1?1:0}
-
-function normalizeAlcaldia(value){
-  const original=cleanText(value);
-  if(!original)return '';
-  const key=original
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ')
-    .trim()
-    .toUpperCase();
-
-  const names={
-    'ALVARO OBREGON':'ÁLVARO OBREGÓN',
-    'BENITO JUAREZ':'BENITO JUÁREZ',
-    'COYOACAN':'COYOACÁN',
-    'CUAUHTEMOC':'CUAUHTÉMOC'
-  };
-
-  return names[key]||key;
 }
 
-function normalizeCCT(v){return cleanText(v).replace(/\s+/g,'').toUpperCase()}
-function cleanText(v){if(v===null||v===undefined)return'';const s=String(v).trim();return!s||s.toLowerCase()==='nan'?'':s}
-function normalizeText(v){return cleanText(v).replace(/\s+/g,' ')}
-function formatMultiline(v){const s=cleanText(v);return escapeHtml(s).replace(/\n/g,'<br>')}
-function avg(a){return a.length?a.reduce((x,y)=>x+Number(y||0),0)/a.length:0}
-function unique(a){return[...new Set(a.filter(Boolean))].sort((x,y)=>x.localeCompare(y,'es'))}
-function pct(a,b){return b?(a/b*100).toFixed(1):'0.0'}
-function q(id){return document.getElementById(id)}
-function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function updateCrossSummary(needs, improvements, projects, risk) {
+  const parts = [];
+  if (projects.length) parts.push(`${projects.length} proyecto${projects.length === 1 ? '' : 's'}`);
+  if (improvements.length) parts.push(`${improvements.length} mejora${improvements.length === 1 ? '' : 's'}`);
+  if (needs.length) parts.push(`${needs.length} variable${needs.length === 1 ? '' : 's'} de mantenimiento`);
+  if (risk) parts.push('1 observación territorial');
+  q('activeCrossSummary').textContent = parts.length ? `Cruce activo: ${parts.join(' + ')}.` : 'Sin cruces temáticos activos.';
+}
+
+function updateMap() {
+  schoolLayer.clearLayers();
+  if (map.getZoom() > 10) drawSchools();
+  drawSummary();
+  updateStats();
+  renderLegend();
+  updateVisibility();
+}
+
+function drawSchools() {
+  schoolLayer.clearLayers();
+  filteredSchools.forEach(school => {
+    const marker = L.circleMarker([school.lat, school.lon], {radius:7, color:borderColor(school), weight:2, fillColor:schoolColor(school), fillOpacity:.9});
+    marker.bindPopup(buildPopup(school), {maxWidth:340});
+    marker.on('click', () => openDetail(school));
+    school.marker = marker;
+    schoolLayer.addLayer(marker);
+  });
+}
+
+function drawSummary() {
+  summaryLayer.clearLayers();
+  const groups = new Map();
+  filteredSchools.forEach(school => {
+    if (!groups.has(school.alcaldia)) groups.set(school.alcaldia, []);
+    groups.get(school.alcaldia).push(school);
+  });
+  groups.forEach((schools, alcaldia) => {
+    if (!alcaldia) return;
+    const lat = schools.reduce((sum,s) => sum + s.lat, 0) / schools.length;
+    const lon = schools.reduce((sum,s) => sum + s.lon, 0) / schools.length;
+    const size = Math.max(34, Math.min(64, 28 + Math.sqrt(schools.length) * 3.5));
+    const icon = L.divIcon({className:'', html:`<div class="summary-marker" style="width:${size}px;height:${size}px">${schools.length}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2]});
+    L.marker([lat,lon], {icon, title:`${alcaldia}: ${schools.length} escuelas`}).bindTooltip(`${escapeHtml(alcaldia)}: ${schools.length.toLocaleString('es-MX')} escuelas`).on('click', () => fitSchools(schools, 12)).addTo(summaryLayer);
+  });
+}
+
+function updateVisibility() {
+  map.removeLayer(schoolLayer);
+  map.removeLayer(summaryLayer);
+  if (!schoolsVisible) return;
+  if (map.getZoom() <= 10 && !q('buscarCCT').value && !q('buscarNombre').value) summaryLayer.addTo(map);
+  else {
+    if (schoolLayer.getLayers().length === 0 && filteredSchools.length) drawSchools();
+    schoolLayer.addTo(map);
+  }
+}
+
+function schoolColor(school) {
+  const projects = checkedValues('#programFilters input');
+  const improvements = checkedValues('#improvementFilters input');
+  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
+  if ((projects.length && improvements.length) || (projects.length && checkedValues('#maintenanceFilters input').length) || (improvements.length && checkedValues('#maintenanceFilters input').length)) return '#111827';
+  if (projects.length) {
+    const match = school.programs.find(row => projects.includes(row.proyecto_id));
+    return PROGRAM_COLORS[Math.max(0, programCatalog.findIndex(p => p.id === match?.proyecto_id)) % PROGRAM_COLORS.length];
+  }
+  if (improvements.length) {
+    const key = improvements.find(value => school.improvements[value]);
+    return IMPROVEMENTS[key]?.color || '#334155';
+  }
+  if (risk) return OBS_COLORS[risk];
+  return CLASS_COLORS[school.clasificacion];
+}
+
+function borderColor(school) {
+  if (school.improvementDetails?.reforzamiento) return '#5b21b6';
+  if (school.programs.length) return '#0f172a';
+  return '#fff';
+}
+
+function buildPopup(school) {
+  const tags = [];
+  school.programs.forEach(row => tags.push(`<span class="mini-tag blue">${escapeHtml(row.proyecto)}</span>`));
+  Object.entries(school.improvements).filter(([,yes]) => yes).forEach(([key]) => tags.push(`<span class="mini-tag teal">${escapeHtml(IMPROVEMENTS[key].label)}</span>`));
+  return `<div class="popup-title">${escapeHtml(school.nombre)}</div><div class="popup-meta">CCT: ${escapeHtml(school.ccts.join(', ') || 'No registrado')}<br>Alcaldía: ${escapeHtml(school.alcaldia || 'No registrada')}<br>Atenciones de revisión: <strong>${school.indice}</strong></div><div class="popup-flags">${tags.slice(0,6).join('')}${tags.length > 6 ? `<span class="mini-tag">+${tags.length-6}</span>` : ''}</div>`;
+}
+
+function openDetail(school) {
+  q('detailPanel').classList.add('open');
+  q('detailTitle').textContent = school.nombre;
+  const needs = school.needs.map(field => `<li><span>${escapeHtml(NEED_LABELS[field])}</span></li>`).join('') || '<li>Sin variables registradas.</li>';
+  const improvements = renderImprovements(school);
+  const programs = school.programs.map(row => `<div class="info-card blue-card"><div class="program-parent">${escapeHtml(row.programa)}</div><h3>${escapeHtml(row.proyecto)}</h3><dl>${detailRow('CCT',row.cct)}${detailRow('Nivel',row.nivel)}${detailRow('Turno(s)',row.turno)}${detailRow('Domicilio',row.domicilio)}${detailRow('Localidad',row.localidad)}${detailRow('Detalle',row.detalle)}</dl></div>`).join('') || '<p class="muted-box">No tiene proyectos registrados.</p>';
+  q('detailContent').innerHTML = `<div class="detail-tabs"><button class="tab-btn active" data-tab="general">General</button><button class="tab-btn" data-tab="mantenimiento">Mantenimiento</button><button class="tab-btn" data-tab="mejoras">Mejoras</button><button class="tab-btn" data-tab="programas">Programas</button><button class="tab-btn" data-tab="riesgos">Observaciones</button></div>
+    <div class="tab-pane active" data-pane="general"><dl>${detailRow('CCT',school.ccts.join(', '))}${detailRow('Alcaldía',school.alcaldia)}${detailRow('Nivel',school.nivel)}${detailRow('Domicilio',school.props.bm_domicilio_principal || school.props.domicilio)}${detailRow('Localidad / colonia',school.props.bm_localidad || school.props.localidad || school.props.colonia)}<dt>Atenciones de revisión</dt><dd>${school.indice} · ${school.clasificacion}</dd></dl></div>
+    <div class="tab-pane" data-pane="mantenimiento"><ul class="need-list">${needs}</ul></div>
+    <div class="tab-pane" data-pane="mejoras">${improvements}</div>
+    <div class="tab-pane" data-pane="programas">${programs}</div>
+    <div class="tab-pane" data-pane="riesgos">${riskDetail(school)}</div>`;
+  activateTabs();
+}
+
+function renderImprovements(school) {
+  const cards = [];
+  const details = school.improvementDetails;
+  if (school.improvements.fam_regular) cards.push(improvementCard('FAM Regular 2025', details.mantenimiento));
+  if (school.improvements.programa_123_2025) cards.push(improvementCard('1, 2, 3 por mi Escuela 2025', projectDetailsByYear(school, '(2025)')));
+  if (school.improvements.fam_potenciado) cards.push(improvementCard('FAM Potenciado 2025', details.famPotenciado));
+  if (school.improvements.fam_potenciado_basico_2026) cards.push(improvementCard('FAM Potenciado + FAM Básico 2026', details.fam2026));
+  if (school.improvements.fam_reforzamiento) cards.push(improvementCard('FAM Reforzamiento estructural', details.reforzamiento));
+  if (school.improvements.programa_123_2026) cards.push(improvementCard('1, 2, 3 por mi Escuela 2026', projectDetailsByYear(school, '(2026)')));
+  if (school.improvements.alcaldia_apoyo) cards.push(improvementCard('Intervención de Alcaldía', details.alcaldiaApoyo));
+  return cards.join('') || '<p class="muted-box">No tiene mejoras registradas en las bases incorporadas.</p>';
+}
+
+function projectDetailsByYear(school, year) {
+  return school.programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes(year)).map(row => ({proyecto:row.proyecto, detalle:row.detalle}));
+}
+
+function improvementCard(title, data) {
+  const records = Array.isArray(data) ? data : [data];
+  const content = records.filter(Boolean).map(record => {
+    const entries = Object.entries(record).filter(([key,value]) => value && !['escuela','cct'].includes(key)).slice(0,9);
+    return `<dl>${entries.map(([key,value]) => detailRow(humanize(key), value)).join('')}</dl>`;
+  }).join('');
+  return `<div class="info-card teal-card"><h3>${escapeHtml(title)}</h3>${content}</div>`;
+}
+
+function riskDetail(school) {
+  const rows = [];
+  if (hasFracture(school)) rows.push(`<div class="observation-card"><strong>Cercanía a fracturamiento</strong><p>Distancia aproximada: ${Math.round(school.distFractura).toLocaleString('es-MX')} m.</p></div>`);
+  if (hasSubsidence(school)) rows.push(`<div class="observation-card"><strong>Subsidencia alta</strong><p>Clasificación registrada: ${escapeHtml(school.subsidenciaClase || String(school.subsidenciaNivel))}.</p></div>`);
+  if (school.improvementDetails.reforzamiento) rows.push('<div class="observation-card reinforced"><strong>Reforzamiento estructural registrado</strong></div>');
+  return rows.join('') || '<p class="muted-box">Sin observaciones territoriales bajo los criterios del visor.</p>';
+}
+
+function activateTabs() {
+  const root = q('detailContent');
+  root.querySelectorAll('.tab-btn').forEach(button => button.onclick = () => {
+    root.querySelectorAll('.tab-btn').forEach(item => item.classList.toggle('active', item === button));
+    root.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('active', pane.dataset.pane === button.dataset.tab));
+  });
+}
+
+function updateStats() {
+  const projects = checkedValues('#programFilters input');
+  const improvements = checkedValues('#improvementFilters input');
+  const needs = checkedValues('#maintenanceFilters input');
+  const high = filteredSchools.filter(s => s.indice >= 15).length;
+  const alcs = new Set(filteredSchools.map(s => s.alcaldia).filter(Boolean)).size;
+  q('summaryTitle').textContent = (projects.length + improvements.length + needs.length) ? 'Resultado del cruce' : 'Resumen visible';
+  const values = [[filteredSchools.length,'Escuelas'],[alcs,'Alcaldías'],[high,'Con 15 o más atenciones'],[projects.length + improvements.length + needs.length,'Opciones activas']];
+  values.forEach(([value,label], index) => { q(`kpi${index+1}`).textContent = Number(value).toLocaleString('es-MX'); q(`kpiLabel${index+1}`).textContent = label; });
+}
+
+function renderLegend() {
+  const projects = checkedValues('#programFilters input');
+  const improvements = checkedValues('#improvementFilters input');
+  const needs = checkedValues('#maintenanceFilters input');
+  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
+  let title = 'Atención de Revisión Diagnóstico';
+  let rows = Object.entries(CLASS_COLORS).map(([label,color]) => [color,label]);
+  if ([projects.length > 0, improvements.length > 0, needs.length > 0, Boolean(risk)].filter(Boolean).length > 1) {
+    title = 'Cruce de selecciones'; rows = [['#111827','Cumple todos los apartados activos']];
+  } else if (projects.length) {
+    title = 'Proyectos seleccionados';
+    rows = projects.slice(0,8).map(id => { const i = programCatalog.findIndex(item => item.id === id); return [PROGRAM_COLORS[i % PROGRAM_COLORS.length], programCatalog[i]?.label || id]; });
+  } else if (improvements.length) {
+    title = 'Mejoras seleccionadas'; rows = improvements.map(key => [IMPROVEMENTS[key].color, IMPROVEMENTS[key].label]);
+  } else if (risk) {
+    title = 'Observación territorial'; rows = [[OBS_COLORS[risk], 'Escuela con observación']];
+  }
+  q('legendTitle').textContent = title;
+  q('legendBody').innerHTML = rows.map(([color,label]) => `<div><span class="swatch" style="background:${color}"></span>${escapeHtml(label)}</div>`).join('');
+}
+
+function drawBoundaries() {
+  alcaldiaBoundaryLayer = L.geoJSON(alcaldiasGeoJSON, {style:{color:'#1f4e79',weight:1,fillOpacity:0,opacity:.6}}).addTo(map);
+  map.fitBounds(alcaldiaBoundaryLayer.getBounds(), {padding:[10,10]});
+}
+
+function drawExtraLayers() {
+  subsidenciaLayer = L.geoJSON(subsidenciasGeoJSON, {style:feature => ({color:'#fff',weight:.3,fillColor:CLASS_COLORS[subClass(Number(feature.properties?.gridcode))] || '#64748b',fillOpacity:.48})});
+  fracturamientoLayer = L.geoJSON(fracturamientoGeoJSON, {style:{color:'#7c2d12',weight:2.2,opacity:.82}, onEachFeature:(feature,layer) => layer.bindTooltip(clean(feature.properties?.TIPO) || 'Fracturamiento', {sticky:true})});
+}
+
+function toggleLayer(layer, on) { if (!layer) return; if (on) layer.addTo(map); else map.removeLayer(layer); }
+
+function populateFilters() {
+  allSchools.forEach(school => { school.alcaldia = normalizeAlcaldia(school.alcaldia); });
+  fillSelect('filtroAlcaldia', unique(allSchools.map(s => s.alcaldia)));
+  fillSelect('filtroNivel', unique(allSchools.map(s => s.nivel)));
+  q('listaCCT').innerHTML = unique(allSchools.flatMap(s => s.ccts)).map(value => `<option value="${escapeAttr(value)}"></option>`).join('');
+  q('listaNombres').innerHTML = unique(allSchools.map(s => s.nombre)).map(value => `<option value="${escapeAttr(value)}"></option>`).join('');
+}
+
+function fillSelect(id, values) {
+  const select = q(id), first = select.querySelector('option').outerHTML;
+  select.innerHTML = first + values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
+}
+
+function filterProgramMenu() {
+  const term = normalize(q('programSearch').value);
+  document.querySelectorAll('.program-option').forEach(label => label.classList.toggle('hidden-by-search', term && !label.dataset.search.includes(term)));
+  document.querySelectorAll('.program-group').forEach(group => {
+    const visible = [...group.querySelectorAll('.program-option')].some(label => !label.classList.contains('hidden-by-search'));
+    group.classList.toggle('hidden-by-search', !visible);
+    if (term && visible) group.open = true;
+  });
+}
+
+function saveState() {
+  if (!initialized) return;
+  localStorage.setItem('visorStateV3:Visor_Xochimilco', JSON.stringify({
+    alcaldia:q('filtroAlcaldia').value, nivel:q('filtroNivel').value,
+    needs:checkedValues('#maintenanceFilters input'), improvements:checkedValues('#improvementFilters input'), projects:checkedValues('#programFilters input'),
+    risk:document.querySelector('input[name="riskMode"]:checked')?.value || '', schools:schoolsVisible,
+    subsidencias:q('toggleSubsidencias').checked, fracturamiento:q('toggleFracturamiento').checked
+  }));
+}
+
+function restoreState() {
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem('visorStateV3:Visor_Xochimilco') || '{}'); } catch {}
+  q('filtroAlcaldia').value = state.alcaldia || '';
+  q('filtroNivel').value = state.nivel || '';
+  restoreChecks('#maintenanceFilters input', state.needs || []);
+  restoreChecks('#improvementFilters input', state.improvements || []);
+  restoreChecks('#programFilters input', state.projects || []);
+  if (state.risk) { const input = document.querySelector(`input[name="riskMode"][value="${CSS.escape(state.risk)}"]`); if (input) input.checked = true; }
+  schoolsVisible = state.schools !== false;
+  q('toggleSchools').checked = schoolsVisible;
+  q('toggleSubsidencias').checked = Boolean(state.subsidencias);
+  q('toggleFracturamiento').checked = Boolean(state.fracturamiento);
+  toggleLayer(subsidenciaLayer, q('toggleSubsidencias').checked);
+  toggleLayer(fracturamientoLayer, q('toggleFracturamiento').checked);
+  q('subsidenciaLegend').classList.toggle('hidden', !q('toggleSubsidencias').checked);
+}
+
+function restoreChecks(selector, values) { document.querySelectorAll(selector).forEach(input => { input.checked = values.includes(input.value); }); }
+function checkedValues(selector) { return [...document.querySelectorAll(`${selector}:checked`)].map(input => input.value); }
+function hasFracture(s) { return s.distFractura !== null && s.distFractura <= 250; }
+function hasSubsidence(s) { return s.subsidenciaNivel >= 4 || ['alta','muy alta'].includes(normalize(s.subsidenciaClase)); }
+function classifyIndex(value) { return value >= 20 ? 'Muy alta' : value >= 15 ? 'Alta' : value >= 10 ? 'Media' : value >= 5 ? 'Baja' : 'Muy baja'; }
+function subClass(code) { return ({1:'Muy baja',2:'Baja',3:'Media',4:'Alta',5:'Muy alta'})[code] || 'No clasificada'; }
+function normalizeCCT(value) { return clean(value).replace(/\s+/g,'').toUpperCase(); }
+function clean(value) { return value === null || value === undefined ? '' : String(value).trim().replace(/\s+/g,' '); }
+function normalize(value) { return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+function normalizeAlcaldia(value) { return clean(value).normalize('NFC').toLocaleUpperCase('es-MX'); }
+function unique(values) { return [...new Set(values.filter(Boolean))].sort((a,b) => a.localeCompare(b,'es')); }
+function humanize(value) { return value.replaceAll('_',' ').replace(/^./, char => char.toUpperCase()); }
+function detailRow(label, value) { const text = clean(value); return text ? `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(text)}</dd>` : ''; }
+function escapeHtml(value) { return clean(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char])); }
+function escapeAttr(value) { return escapeHtml(value); }
+function q(id) { return document.getElementById(id); }
+function debounce(fn, delay) { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); }; }
+
+function toggleMenu(bodyId, arrowId, buttonId) {
+  const body = q(bodyId), open = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !open); q(arrowId).textContent = open ? '⌄' : '›'; q(buttonId).setAttribute('aria-expanded', String(open));
+}
+function toggleBox(bodyId, buttonId) { const body=q(bodyId), hidden=body.classList.toggle('hidden'); q(buttonId).textContent=hidden?'+':'−'; }
+function collapseSidebar() { q('layout').classList.add('sidebar-collapsed'); q('sidebar').classList.add('hidden-panel'); q('showSidebar').classList.remove('hidden'); setTimeout(() => map.invalidateSize(), 200); }
+function expandSidebar() { q('layout').classList.remove('sidebar-collapsed'); q('sidebar').classList.remove('hidden-panel'); q('showSidebar').classList.add('hidden'); setTimeout(() => map.invalidateSize(), 200); }
+function setStatus(message, error=false) { q('mapStatus').textContent=message; q('mapStatus').classList.toggle('error',error); q('mapStatus').classList.toggle('hidden',!message); }
+function fitSchools(schools, maxZoom=14) { if (!schools.length) return; map.fitBounds(L.latLngBounds(schools.map(s => [s.lat,s.lon])), {padding:[40,40], maxZoom}); }
+function zoomToAlcaldia() { const name=q('filtroAlcaldia').value; if (!name) return; const matches=allSchools.filter(s => s.alcaldia===name); fitSchools(matches,12); }
+function zoomToMatch(type) { const value=type==='cct'?normalizeCCT(q('buscarCCT').value):normalize(q('buscarNombre').value); if (!value) return; const school=allSchools.find(s => type==='cct'?s.ccts.some(c => c.includes(value)):normalize(s.nombre).includes(value)); if (school) map.setView([school.lat,school.lon],16); }
