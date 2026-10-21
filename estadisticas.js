@@ -1,30 +1,308 @@
-const PATHS={schools:'data/infraestructura_educativa_2026.json',programs:'data/programas_integradores.json',maintenance:'data/mantenimiento.json',reinforcement:'data/reforzamiento.json',famPotenciado:'data/fam_potenciado_2025.json',fam2026:'data/fam_potenciado_basico_2026.json',alcaldia:'data/beneficiadas_alcaldia_iztapalapa.json'};
-const CCT_FIELDS=['cct1','cct2','cct3','cct4'];
-const NEEDS=['impermeabi','interior','exterior1','loseta','ventanas','ventanas1','ventanas2','puertas','escaleras','pluviales','techos','desazolve','deterioro','concreto','tinacos','cisterna','agua','agua1','hidrosanit','sanitarios','luminarias','electrica','transforma','lamina'];
-const IMPROVEMENT_LABELS={fam_regular:'FAM Regular 2025',programa_123_2025:'1, 2, 3 por mi Escuela 2025',fam_potenciado:'FAM Potenciado 2025',fam_potenciado_basico_2026:'FAM Potenciado + FAM Básico 2026',fam_reforzamiento:'FAM Reforzamiento estructural',programa_123_2026:'1, 2, 3 por mi Escuela 2026',alcaldia_apoyo:'Intervención de Alcaldía',ambas:'Con mantenimiento y reforzamiento'};
-let schools=[],catalog=new Map(),state={};
-document.addEventListener('DOMContentLoaded',init);
+'use strict';
 
-async function init(){
-  const keys=Object.keys(PATHS); const values=await Promise.all(keys.map(key=>fetchJson(PATHS[key]))); const data=Object.fromEntries(keys.map((key,index)=>[key,values[index]]));
-  schools=(data.schools.features||[]).map((feature,index)=>normalizeSchool(feature.properties||{},feature.geometry?.coordinates||[],index,false)).filter(Boolean);
-  mergeProgramOnly(schools,data.programs); joinPrograms(schools,data.programs); joinImprovements(schools,data);
-  buildCatalog(data.programs); populateFilters(); bindUI(); restoreState(); applyStats();
+const q = id => document.getElementById(id);
+const clean = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+const fmt = value => Number(value || 0).toLocaleString('es-MX');
+const pct = (value, total) => total ? `${(value * 100 / total).toFixed(1)}%` : '0.0%';
+
+let dataset;
+let programMap = new Map();
+let maintenanceMap = new Map();
+let filtered = [];
+
+init();
+
+async function init() {
+  try {
+    const [main, turnCatalog, conteoInmuebles] = await Promise.all([
+      loadMainData(),
+      fetchJson('data/catalogo_cct_turnos.json'),
+      fetchJson('data/inmuebles_conteo.json')
+    ]);
+    dataset = InmueblesMaster.apply(CctMaster.merge(main, turnCatalog), conteoInmuebles);
+    dataset.metadata.cct_con_indice_final = dataset.ccts.filter(record => Number.isFinite(record.indice_prioridad_final)).length;
+    dataset.programas = dataset.programas.map(program => ({...program, count:dataset.ccts.filter(record => record.programas.includes(program.id)).length}));
+    programMap = new Map(dataset.programas.map(program => [program.id, program]));
+    maintenanceMap = new Map(dataset.mantenimiento_variables.map(variable => [variable.id, variable]));
+    buildFilters();
+    bindEvents();
+    restoreState();
+    render();
+  } catch (error) {
+    console.error(error);
+    q('statsContext').textContent = `No fue posible cargar la información: ${error.message}`;
+  }
 }
-async function fetchJson(path){const response=await fetch(path,{cache:'no-store'});if(!response.ok)throw new Error(path);return response.json()}
-function normalizeSchool(p,coords,index,programOnly){const lon=Number(coords[0]??p.lon),lat=Number(coords[1]??p.lat);if(!Number.isFinite(lon)||!Number.isFinite(lat))return null;const needs=NEEDS.filter(field=>Number(p[field])===1),indice=Number.isFinite(Number(p.Indice_Man))?Number(p.Indice_Man):needs.length;return{nombre:clean(p.inmueble||p.nombre)||'Escuela sin nombre',alcaldia:clean(p.alcaldia).toLocaleUpperCase('es-MX'),nivel:clean(p.principal||p.nivel),ccts:(programOnly?[p.cct]:CCT_FIELDS.map(field=>p[field])).map(cct).filter(Boolean),needs,indice,clasificacion:classify(indice),subsidencia:Number(p.subsidencia_nivel)||null,distFractura:Number.isFinite(Number(p.dist_fractura_m))?Number(p.dist_fractura_m):null,programOnly,programs:[],improvements:{},reinforcement:null}}
-function mergeProgramOnly(list,rows){const known=new Set(list.flatMap(s=>s.ccts)),missing=new Map();rows.forEach(row=>{if(!known.has(row.cct)&&!missing.has(row.cct))missing.set(row.cct,row)});missing.forEach(row=>{const school=normalizeSchool({cct:row.cct,nombre:row.nombre,alcaldia:row.alcaldia,nivel:row.nivel,lon:row.lon,lat:row.lat},[],row.cct,true);if(school)list.push(school)})}
-function joinPrograms(list,rows){const index=new Map();rows.forEach(row=>{if(!index.has(row.cct))index.set(row.cct,[]);index.get(row.cct).push(row)});list.forEach(s=>{const unique=new Map();s.ccts.flatMap(value=>index.get(value)||[]).forEach(row=>unique.set(`${row.cct}|${row.proyecto_id}`,row));s.programs=[...unique.values()]})}
-function joinImprovements(list,data){const map=rows=>new Map(rows.map(row=>[cct(row.cct),row]));const mm=map(data.maintenance),rr=map(data.reinforcement),fp=map(data.famPotenciado),f26=map(data.fam2026),aa=map(data.alcaldia);const p25=new Set(data.programs.filter(row=>norm(row.programa)==='1 2 3 por mi escuela'&&row.proyecto.includes('(2025)')).map(row=>row.cct)),p26=new Set(data.programs.filter(row=>norm(row.programa)==='1 2 3 por mi escuela'&&row.proyecto.includes('(2026)')).map(row=>row.cct));list.forEach(s=>{const first=index=>s.ccts.map(value=>index.get(value)).find(Boolean)||null;const maintenance=first(mm),reinforcement=first(rr);s.reinforcement=reinforcement;s.improvements={fam_regular:Boolean(maintenance&&norm(maintenance.responsable).includes('ilife')),programa_123_2025:s.ccts.some(value=>p25.has(value)),fam_potenciado:Boolean(first(fp)),fam_potenciado_basico_2026:Boolean(first(f26)),fam_reforzamiento:Boolean(reinforcement),programa_123_2026:s.ccts.some(value=>p26.has(value)),alcaldia_apoyo:Boolean(first(aa)),ambas:Boolean(maintenance&&reinforcement)}})}
-function buildCatalog(rows){rows.forEach(row=>{if(!catalog.has(row.proyecto_id))catalog.set(row.proyecto_id,row.proyecto)})}
-function populateFilters(){fill('stAlcaldia',unique(schools.map(s=>s.alcaldia)));fill('stNivel',unique(schools.map(s=>s.nivel)))}
-function fill(id,values){const select=q(id),first=select.querySelector('option').outerHTML;select.innerHTML=first+values.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('')}
-function bindUI(){['stAlcaldia','stNivel'].forEach(id=>q(id).onchange=applyStats);['stCCT','stNombre'].forEach(id=>q(id).oninput=applyStats);q('stLimpiar').onclick=()=>{q('stAlcaldia').value='';q('stNivel').value='';q('stCCT').value='';q('stNombre').value='';applyStats()}}
-function restoreState(){try{state=JSON.parse(localStorage.getItem('visorStateV3:Visor_Xochimilco')||'{}')}catch{state={}}q('stAlcaldia').value=state.alcaldia||'';q('stNivel').value=state.nivel||''}
-function applyStats(){const a=q('stAlcaldia').value,n=q('stNivel').value,termCct=cct(q('stCCT').value),name=norm(q('stNombre').value),needs=state.needs||[],improvements=state.improvements||[],projects=state.projects||[],risk=state.risk||'';const result=schools.filter(s=>{if(a&&s.alcaldia!==a)return false;if(n&&s.nivel!==n)return false;if(termCct&&!s.ccts.some(value=>value.includes(termCct)))return false;if(name&&!norm(s.nombre).includes(name))return false;if(s.programOnly&&!projects.length)return false;if(needs.length&&!needs.every(field=>s.needs.includes(field)))return false;if(improvements.length&&!improvements.some(key=>s.improvements[key]))return false;if(projects.length&&!s.programs.some(row=>projects.includes(row.proyecto_id)))return false;if(risk==='obs_fractura'&&!(s.distFractura!==null&&s.distFractura<=250))return false;if(risk==='obs_subsidencia'&&!(s.subsidencia>=4))return false;if(risk==='obs_combinada'&&!((s.distFractura!==null&&s.distFractura<=250)&&s.subsidencia>=4))return false;return true});render(result,{needs,improvements,projects,risk})}
-function render(rows,selection){q('stTotal').textContent=rows.length.toLocaleString('es-MX');q('stMax').textContent=rows.length?Math.max(...rows.map(s=>s.indice)):0;q('stAux1').textContent=unique(rows.map(s=>s.alcaldia)).length;q('stAux2').textContent=rows.length?(rows.reduce((sum,s)=>sum+s.indice,0)/rows.length).toFixed(1):'0.0';const tags=[];selection.projects.forEach(id=>tags.push(catalog.get(id)||id));selection.improvements.forEach(key=>tags.push(IMPROVEMENT_LABELS[key]||key));if(selection.needs.length)tags.push(`${selection.needs.length} variable(s) de mantenimiento`);if(selection.risk)tags.push('Observación territorial');q('statsContext').textContent=tags.length?'Se aplicó el cruce guardado desde el mapa.':'No hay cruces temáticos activos; se muestra la base general.';q('statsTags').innerHTML=tags.map(text=>`<span class="mini-tag blue">${esc(text)}</span>`).join('');renderDistribution(rows);renderGrouped(rows,'nivel','tablaNivel',false);renderGrouped(rows,'alcaldia','tablaAlcaldia',true);renderRanking(rows)}
-function renderDistribution(rows){const classes=['Muy baja','Baja','Media','Alta','Muy alta'];q('tablaDistribucion').innerHTML=classes.map(label=>{const count=rows.filter(s=>s.clasificacion===label).length;return`<tr><td>${label}</td><td>${count.toLocaleString('es-MX')}</td><td>${pct(count,rows.length)}%<div class="bar"><span style="width:${pct(count,rows.length)}%"></span></div></td></tr>`}).join('')}
-function renderGrouped(rows,field,target,full){const groups={};rows.forEach(s=>(groups[s[field]||'No registrado']??=[]).push(s));const result=Object.entries(groups).map(([name,list])=>({name,total:list.length,max:Math.max(...list.map(s=>s.indice)),ref:list.filter(s=>s.reinforcement).length})).sort((a,b)=>b.total-a.total);q(target).innerHTML=result.length?result.map(r=>full?`<tr><td>${esc(r.name)}</td><td>${r.total}</td><td>${r.max}</td><td>${r.ref}</td><td>${pct(r.total,rows.length)}%</td></tr>`:`<tr><td>${esc(r.name)}</td><td>${r.total}</td><td>${r.max}</td></tr>`).join(''):`<tr><td colspan="${full?5:3}" class="empty-row">No hay resultados.</td></tr>`}
-function renderRanking(rows){q('tablaRanking').innerHTML=rows.length?[...rows].sort((a,b)=>b.indice-a.indice||a.nombre.localeCompare(b.nombre,'es')).slice(0,250).map((s,index)=>`<tr><td>${index+1}</td><td>${esc(s.nombre)}</td><td>${esc(s.ccts.join(', '))}</td><td>${esc(s.alcaldia)}</td><td>${esc(s.nivel)}</td><td><strong>${s.indice}</strong></td><td>${esc(unique(s.programs.map(row=>row.proyecto)).join(' · ')||'—')}</td></tr>`).join(''):'<tr><td colspan="7" class="empty-row">No hay resultados.</td></tr>'}
-function classify(value){return value>=20?'Muy alta':value>=15?'Alta':value>=10?'Media':value>=5?'Baja':'Muy baja'}
-function pct(a,b){return b?(a/b*100).toFixed(1):'0.0'}function cct(value){return clean(value).replace(/\s+/g,'').toUpperCase()}function clean(value){return value===null||value===undefined?'':String(value).trim().replace(/\s+/g,' ')}function norm(value){return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}function unique(values){return[...new Set(values.filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'))}function q(id){return document.getElementById(id)}function esc(value){return clean(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]))}
+
+async function fetchJson(url) {
+  const response = await fetch(url, {cache:'no-store'});
+  if (!response.ok) throw new Error(`Error ${response.status} al cargar ${url}`);
+  return response.json();
+}
+
+async function loadMainData() {
+  const manifest = await fetchJson('data/rm08_infraestructura.json');
+  if (!Array.isArray(manifest.partes_datos) || !manifest.partes_datos.length) return manifest;
+  const [parts, supports] = await Promise.all([
+    Promise.all(manifest.partes_datos.map(file => fetchJson(`data/${file}`))),
+    fetchJson('data/apoyos_detallados.json')
+  ]);
+  const updates = Array.isArray(supports.actualizaciones_programas) ? supports.actualizaciones_programas : [];
+  const attachSupportDetails = (items, collection) => items.map(item => {
+    const details = [...(supports[collection]?.[item.uid] || [])];
+    const matchingUpdates = updates.filter(update => item.ccts.includes(update.cct));
+    matchingUpdates.forEach(update => {
+      if (!details.some(detail => detail.programa === update.programa_nombre && detail.ejecutor === update.ejecutor)) {
+        details.push({programa:update.programa_nombre, ejecutor:update.ejecutor});
+      }
+    });
+    const updatedItem = matchingUpdates.reduce((updated, update) => ({
+      ...updated,
+      programas: [...new Set([...updated.programas, update.programa_id])],
+      mejoras_previas: [...new Set([...updated.mejoras_previas, update.programa_label])],
+      mejoras_previas_ids: [...new Set([...updated.mejoras_previas_ids, update.programa_id])],
+      tuvo_apoyo_previo: true,
+      apoyos_recibidos_detalle: details
+    }), {...item});
+    if (updatedItem.programas.includes('ilife_180_2026')) {
+      updatedItem.mejoras_previas = updatedItem.mejoras_previas.map(label => label === '180 ILIFE · 2026' ? '181 ILIFE · 2026' : label);
+    }
+    return {...updatedItem, apoyos_recibidos_detalle:details};
+  });
+  const inmuebles = attachSupportDetails(parts.flatMap(part => part.inmuebles || []), 'inmuebles');
+  const ccts = attachSupportDetails(parts.flatMap(part => part.ccts || []), 'ccts');
+  const programas = manifest.programas.map(program => ({
+    ...program,
+    label: program.id === 'ilife_180_2026' ? '181 ILIFE · 2026' : program.label,
+    count: program.id === 'ilife_180_2026' ? 181 : program.count
+  }));
+  return {
+    ...manifest,
+    programas,
+    inmuebles,
+    ccts
+  };
+}
+
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es'));
+}
+
+function fillSelect(select, values) {
+  values.forEach(value => select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`));
+}
+
+function buildFilters() {
+  const all = [...dataset.inmuebles, ...dataset.ccts];
+  fillSelect(q('stAlcaldia'), unique(all.map(item => item.alcaldia)));
+  fillSelect(q('stNivel'), unique(all.flatMap(item => item.niveles)).filter(level => !CctMaster.excludedLevels.has(level)));
+  q('stPrograms').innerHTML = dataset.programas.map(program =>
+    `<label><input type="checkbox" value="${escapeHtml(program.id)}"><span><i class="program-dot" style="--program-color:${escapeHtml(program.color)}"></i>${escapeHtml(program.label)}</span></label>`
+  ).join('');
+  q('stMaintenance').innerHTML = dataset.mantenimiento_variables.map(variable =>
+    `<label title="${escapeHtml(variable.nombre_completo)}"><input type="checkbox" value="${escapeHtml(variable.id)}"><span>${escapeHtml(variable.nombre)} <small>· ${variable.peso} pts</small></span></label>`
+  ).join('');
+}
+
+function bindEvents() {
+  ['stViewMode','stAlcaldia','stNivel','stCCT','stNombre','stRankMin','stRankMax'].forEach(id => {
+    q(id).addEventListener(id === 'stViewMode' || id.startsWith('stA') || id === 'stNivel' ? 'change' : 'input', render);
+  });
+  q('stPriorityFilters').addEventListener('change', render);
+  q('stPrograms').addEventListener('change', render);
+  q('stMaintenance').addEventListener('change', render);
+  document.querySelectorAll('input[name="stRisk"]').forEach(input => input.addEventListener('change', render));
+  q('stAllPrograms').onclick = () => setPrograms(true);
+  q('stClearPrograms').onclick = () => setPrograms(false);
+  q('stAllMaintenance').onclick = () => setMaintenance(true);
+  q('stClearMaintenance').onclick = () => setMaintenance(false);
+  q('stAllPriorities').onclick = () => setPriorities(true);
+  q('stClearPriorities').onclick = () => setPriorities(false);
+  q('stClearRisk').onclick = () => {
+    document.querySelectorAll('input[name="stRisk"]').forEach(input => input.checked = false);
+    render();
+  };
+  q('stLimpiar').onclick = clearFilters;
+}
+
+function setPrograms(checked) {
+  document.querySelectorAll('#stPrograms input').forEach(input => input.checked = checked);
+  render();
+}
+
+function setPriorities(checked) {
+  document.querySelectorAll('#stPriorityFilters input').forEach(input => input.checked = checked);
+  render();
+}
+
+function setMaintenance(checked) {
+  document.querySelectorAll('#stMaintenance input').forEach(input => input.checked = checked);
+  render();
+}
+
+function getState() {
+  return {
+    mode:q('stViewMode').value,
+    alcaldia:q('stAlcaldia').value,
+    nivel:q('stNivel').value,
+    prioridades:[...document.querySelectorAll('#stPriorityFilters input:checked')].map(input => input.value),
+    cct:q('stCCT').value,
+    nombre:q('stNombre').value,
+    rankMin:q('stRankMin').value,
+    rankMax:q('stRankMax').value,
+    programas:[...document.querySelectorAll('#stPrograms input:checked')].map(input => input.value),
+    mantenimiento:[...document.querySelectorAll('#stMaintenance input:checked')].map(input => input.value),
+    risk:document.querySelector('input[name="stRisk"]:checked')?.value || ''
+  };
+}
+
+function restoreState() {
+  try {
+    const state = JSON.parse(localStorage.getItem('rm08_visor_state_xochimilco') || 'null');
+    if (!state) return;
+    q('stViewMode').value = 'cct';
+    ['alcaldia','nivel'].forEach(field => {
+      const id = `st${field.charAt(0).toUpperCase() + field.slice(1)}`;
+      if ([...q(id).options].some(option => option.value === state[field])) q(id).value = state[field] || '';
+    });
+    const restoredPriorities = state.prioridades || (state.prioridad ? [state.prioridad] : []);
+    document.querySelectorAll('#stPriorityFilters input').forEach(input => input.checked = restoredPriorities.includes(input.value));
+    q('stCCT').value = state.cct || '';
+    q('stNombre').value = state.nombre || '';
+    q('stRankMin').value = state.rankMin || '';
+    q('stRankMax').value = state.rankMax || '';
+    document.querySelectorAll('#stPrograms input').forEach(input => input.checked = (state.programas || []).includes(input.value));
+    document.querySelectorAll('#stMaintenance input').forEach(input => input.checked = (state.mantenimiento || []).includes(input.value));
+    const risk = document.querySelector(`input[name="stRisk"][value="${state.risk}"]`);
+    if (risk) risk.checked = true;
+  } catch (_) {}
+}
+
+function render() {
+  if (!dataset) return;
+  const state = getState();
+  try { localStorage.setItem('rm08_visor_state_xochimilco', JSON.stringify(state)); } catch (_) {}
+  filtered = InmueblesMaster.filterCcts(dataset, state);
+  updateContext(state);
+  updateCards(state);
+  updatePriorityTable();
+  updateLevelTable();
+  updateProgramTable();
+  updateMaintenanceTable();
+  updateRiskTable();
+  updateAlcaldiaTable();
+  updateRanking(state);
+}
+
+function updateContext(state) {
+  const tags = [];
+  if (state.alcaldia) tags.push(state.alcaldia);
+  if (state.nivel) tags.push(state.nivel);
+  if (state.prioridades.length) tags.push(`IPA: ${state.prioridades.join(', ')}`);
+  if (state.cct) tags.push(`CCT: ${state.cct}`);
+  if (state.nombre) tags.push(`Plantel: ${state.nombre}`);
+  if (state.rankMin || state.rankMax) tags.push(`Clasificación ${state.rankMin || 1}–${state.rankMax || 464}`);
+  if (state.programas.length) tags.push(`${state.programas.length} mejora(s)`);
+  if (state.mantenimiento.length) tags.push(`${state.mantenimiento.length} necesidad(es) de mantenimiento`);
+  if (state.risk) tags.push('Observación territorial');
+  q('statsContext').textContent = tags.length ? `Se aplican ${tags.length} criterio(s) de manera simultánea.` : 'Sin filtros: se muestra la base completa.';
+  q('statsTags').innerHTML = tags.map(tag => `<span class="mini-tag blue">${escapeHtml(tag)}</span>`).join('');
+}
+
+function updateCards(state) {
+  const unit = state.mode === 'cct' ? 'CCT' : 'Inmuebles';
+  q('stTotalLabel').textContent = `${unit} del resultado`;
+  q('stTotal').textContent = fmt(filtered.length);
+  q('stInmuebles').textContent = fmt(InmueblesMaster.count(dataset, filtered));
+  q('stMapped').textContent = fmt(filtered.filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lon)).length);
+  q('stHigh').textContent = fmt(filtered.filter(item => ['Alta','Muy alta'].includes(item.clase_prioridad_final)).length);
+  q('stTerritorial').textContent = fmt(filtered.filter(item => item.observacion_territorial !== 'Sin observación').length);
+  q('stSupport').textContent = fmt(filtered.filter(item => item.tuvo_apoyo_previo).length);
+  q('stMaintenancePending').textContent = fmt(filtered.filter(item => item.mantenimiento_pendientes.length).length);
+  ['stDistributionUnit','stLevelUnit','stProgramUnit','stRiskUnit','stMaintenanceUnit','stAlcaldiaUnit'].forEach(id => q(id).textContent = unit);
+}
+
+function updatePriorityTable() {
+  const labels = ['Muy alta','Alta','Media','Baja','Muy baja','Sin información'];
+  q('tablaDistribucion').innerHTML = labels.map(label => {
+    const count = filtered.filter(item => item.clase_prioridad_final === label).length;
+    return `<tr><td>${escapeHtml(label)}</td><td>${fmt(count)}</td><td>${barCell(count, filtered.length)}</td></tr>`;
+  }).join('');
+}
+
+function updateLevelTable() {
+  const rows = groupBy(filtered, item => item.nivel || 'Sin nivel').map(([label, items]) => ({
+    label, count:items.length, high:items.filter(item => ['Alta','Muy alta'].includes(item.clase_prioridad_final)).length
+  })).sort((a,b) => b.count - a.count);
+  q('tablaNivel').innerHTML = rows.length ? rows.map(row => `<tr><td>${escapeHtml(row.label)}</td><td>${fmt(row.count)}</td><td>${fmt(row.high)}</td></tr>`).join('') : emptyRow(3);
+}
+
+function updateMaintenanceTable() {
+  q('tablaMantenimiento').innerHTML = dataset.mantenimiento_variables.map(variable => {
+    const count = filtered.filter(item => item.mantenimiento_pendientes.includes(variable.id)).length;
+    return `<tr><td title="${escapeHtml(variable.nombre_completo)}">${escapeHtml(variable.nombre)}</td><td>${fmt(count)}</td><td>${barCell(count, filtered.length)}</td></tr>`;
+  }).join('');
+}
+
+function updateProgramTable() {
+  q('tablaProgramas').innerHTML = dataset.programas.map(program => {
+    const count = filtered.filter(item => item.programas.includes(program.id)).length;
+    return `<tr><td><i class="program-dot" style="--program-color:${escapeHtml(program.color)}"></i>${escapeHtml(program.label)}</td><td>${fmt(count)}</td><td>${barCell(count, filtered.length)}</td></tr>`;
+  }).join('');
+}
+
+function updateRiskTable() {
+  const labels = ['Observación combinada','Cercanía a fracturamiento','Subsidencia alta','Sin observación','Información territorial incompleta'];
+  q('tablaRiesgos').innerHTML = labels.map(label => {
+    const count = filtered.filter(item => item.observacion_territorial === label).length;
+    return `<tr><td>${escapeHtml(label)}</td><td>${fmt(count)}</td><td>${barCell(count, filtered.length)}</td></tr>`;
+  }).join('');
+}
+
+function updateAlcaldiaTable() {
+  const rows = groupBy(filtered, item => item.alcaldia || 'Sin alcaldía').map(([label, items]) => ({
+    label, count:items.length,
+    high:items.filter(item => ['Alta','Muy alta'].includes(item.clase_prioridad_final)).length,
+    program:items.filter(item => item.programas.length).length,
+    support:items.filter(item => item.tuvo_apoyo_previo).length
+  })).sort((a,b) => b.count - a.count);
+  q('tablaAlcaldia').innerHTML = rows.length ? rows.map(row => `<tr><td>${escapeHtml(row.label)}</td><td>${fmt(row.count)}</td><td>${fmt(row.high)}</td><td>${fmt(row.program)}</td><td>${fmt(row.support)}</td><td>${barCell(row.count, filtered.length)}</td></tr>`).join('') : emptyRow(6);
+}
+
+function updateRanking(state) {
+  const rows = [...filtered].sort((a,b) =>
+    (b.indice_prioridad_final ?? -1) - (a.indice_prioridad_final ?? -1) ||
+    (a.prioridad_123_2026 ?? 9999) - (b.prioridad_123_2026 ?? 9999) ||
+    a.nombre.localeCompare(b.nombre, 'es')
+  ).slice(0, 500);
+  q('stRankingTitle').textContent = `${state.mode === 'cct' ? 'CCT' : 'Inmuebles'} del resultado`;
+  q('tablaRanking').innerHTML = rows.length ? rows.map((item,index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.nombre)}</td><td>${escapeHtml(item.ccts.join(', ') || '—')}</td><td>${escapeHtml(item.alcaldia || '—')}</td><td>${escapeHtml(item.niveles.join(', ') || '—')}</td><td><span class="priority-pill p-${clean(item.clase_prioridad_final).toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(item.clase_prioridad_final)} · ${item.indice_prioridad_final ?? '—'}</span></td><td>${item.indice_mantenimiento === null ? 'Sin información' : `${item.indice_mantenimiento} · ${escapeHtml(item.clase_mantenimiento)}`}</td><td>${item.tuvo_apoyo_previo ? 'Sí' : 'No'}</td><td>${escapeHtml(item.mejoras_previas.join('; ') || '—')}</td><td>${item.prioridad_123_2026 ?? '—'}</td><td>${escapeHtml(item.programas.map(id => programMap.get(id)?.label || id).join('; ') || '—')}</td><td>${escapeHtml(item.observacion_territorial)}</td></tr>`).join('') : emptyRow(12);
+}
+
+function groupBy(items, getter) {
+  const map = new Map();
+  items.forEach(item => {
+    const key = getter(item);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  });
+  return [...map.entries()];
+}
+
+function barCell(value, total) {
+  const width = total ? value * 100 / total : 0;
+  return `<div class="bar"><span style="width:${width.toFixed(2)}%"></span></div><small>${pct(value,total)}</small>`;
+}
+
+function emptyRow(cols) {
+  return `<tr><td colspan="${cols}" class="empty-row">No hay resultados para este cruce.</td></tr>`;
+}
+
+function clearFilters() {
+  ['stAlcaldia','stNivel','stCCT','stNombre','stRankMin','stRankMax'].forEach(id => q(id).value = '');
+  q('stViewMode').value = 'cct';
+  document.querySelectorAll('#stPriorityFilters input, #stPrograms input, #stMaintenance input, input[name="stRisk"]').forEach(input => input.checked = false);
+  render();
+}

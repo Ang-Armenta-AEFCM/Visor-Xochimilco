@@ -1,551 +1,687 @@
+'use strict';
+
 const DATA = {
-  schools: 'data/infraestructura_educativa_2026.json',
+  main: 'data/rm08_infraestructura.json',
+  turnos: 'data/catalogo_cct_turnos.json',
+  conteoInmuebles: 'data/inmuebles_conteo.json?v=20261005-inmuebles-2769',
+  detalleObra: 'data/detalle_obra_2025.json?v=20261005-actas-2025',
+  supports: 'data/apoyos_detallados.json',
   alcaldias: 'data/alcaldias.json',
   subsidencias: 'data/subsidencias.json',
-  fracturamiento: 'data/fracturamiento.json',
-  mantenimiento: 'data/mantenimiento.json',
-  reforzamiento: 'data/reforzamiento.json',
-  famPotenciado: 'data/fam_potenciado_2025.json',
-  fam2026: 'data/fam_potenciado_basico_2026.json',
-  alcaldiaApoyo: 'data/beneficiadas_alcaldia_iztapalapa.json',
-  programas: 'data/programas_integradores.json'
+  fracturamiento: 'data/fracturamiento.json'
 };
 
-const FIELDS = {
-  ccts: ['cct1', 'cct2', 'cct3', 'cct4'], alcaldia: 'alcaldia', nivel: 'principal',
-  nombre: 'inmueble', x: 'coord_x', y: 'coord_y', indice: 'Indice_Man'
-};
-const NEEDS = ['impermeabi','interior','exterior1','loseta','ventanas','ventanas1','ventanas2','puertas','escaleras','pluviales','techos','desazolve','deterioro','concreto','tinacos','cisterna','agua','agua1','hidrosanit','sanitarios','luminarias','electrica','transforma','lamina'];
-const NEED_LABELS = {impermeabi:'Impermeabilización',interior:'Pintura interior',exterior1:'Pintura exterior',loseta:'Loseta',ventanas:'Vidrios / ventanas',ventanas1:'Cancelería de aluminio / ventanas',ventanas2:'Cancelería de herrería / ventanas',puertas:'Puertas',escaleras:'Barandales, pasillos o escaleras',pluviales:'Bajadas pluviales',techos:'Muros o techos',desazolve:'Desazolve',deterioro:'Deterioro de estructura o acabados',concreto:'Concreto',tinacos:'Tinacos',cisterna:'Cisterna',agua:'Agua potable',agua1:'Red o abastecimiento de agua',hidrosanit:'Instalación hidrosanitaria',sanitarios:'Sanitarios',luminarias:'Luminarias',electrica:'Instalación eléctrica',transforma:'Transformador',lamina:'Lámina'};
-const CLASS_COLORS = {'Muy baja':'#2ca25f','Baja':'#86c98a','Media':'#f2c94c','Alta':'#f97316','Muy alta':'#dc2626'};
-const PROGRAM_COLORS = ['#0369a1','#7e22ce','#047857','#b45309','#be123c','#0f766e','#4338ca','#9f1239'];
-const IMPROVEMENTS = {
-  fam_regular: {label:'FAM Regular 2025', color:'#0f766e'},
-  programa_123_2025: {label:'1, 2, 3 por mi Escuela 2025', color:'#2563eb'},
-  fam_potenciado: {label:'FAM Potenciado 2025', color:'#ca8a04'},
-  fam_potenciado_basico_2026: {label:'FAM Potenciado + FAM Básico 2026', color:'#15803d'},
-  fam_reforzamiento: {label:'FAM Reforzamiento estructural', color:'#7c3aed'},
-  programa_123_2026: {label:'1, 2, 3 por mi Escuela 2026', color:'#0891b2'},
-  alcaldia_apoyo: {label:'Intervención de Alcaldía', color:'#be123c'},
-  ambas: {label:'Con mantenimiento y reforzamiento', color:'#111827'}
-};
-const OBS_COLORS = {obs_fractura:'#c2410c', obs_subsidencia:'#ca8a04', obs_combinada:'#b91c1c'};
+document.head.insertAdjacentHTML('beforeend', `<style id="support-detail-styles">
+.support-detail-list{display:grid;gap:9px}.support-detail{padding:11px;border:1px solid #a7d8c9;border-left:4px solid #0f766e;border-radius:9px;background:#f7fffc}.support-detail-head{display:grid;grid-template-columns:26px 1fr;gap:9px;align-items:start}.support-check{display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:#0f766e;color:#fff;font-size:14px;font-weight:900;line-height:1}.support-detail-head small{display:block;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}.support-detail-head strong{display:block;margin-top:2px;color:#134e4a;font-size:12px;line-height:1.35}.support-detail-head em{display:block;margin-top:3px;color:#52677a;font-size:10px;font-style:normal;line-height:1.4}.support-detail>p{margin:9px 0 0 32px!important;color:#64748b;font-size:11px!important;line-height:1.45!important}.support-work-list{display:grid;gap:6px;margin:10px 0 0 32px;padding:0;list-style:none}.support-work-list li{display:grid;grid-template-columns:19px 1fr;gap:7px;align-items:start;padding:7px 8px;border:1px solid #d1fae5;border-radius:7px;background:#fff}.support-work-list li span{display:grid;place-items:center;width:18px;height:18px;border-radius:4px;background:#d1fae5;color:#047857;font-size:11px;font-weight:900}.support-work-list li strong{color:#334155;font-size:11px;line-height:1.4}@media(max-width:600px){.support-work-list,.support-detail>p{margin-left:0!important}}
+</style>`);
 
-let allSchools = [], filteredSchools = [], programRows = [], programCatalog = [];
-let alcaldiasGeoJSON = null, subsidenciasGeoJSON = null, fracturamientoGeoJSON = null;
-let alcaldiaBoundaryLayer = null, subsidenciaLayer = null, fracturamientoLayer = null;
-let schoolsVisible = true, initialized = false;
-const schoolLayer = L.layerGroup();
-const summaryLayer = L.layerGroup();
+const q = id => document.getElementById(id);
+const clean = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+const formatNumber = value => Number(value || 0).toLocaleString('es-MX');
+const isMapped = item => Number.isFinite(item.lat) && Number.isFinite(item.lon);
 
-const map = L.map('map', {zoomControl:false, preferCanvas:true}).setView([19.35, -99.13], 10);
+let dataset;
+let detalleObraPorCct = {};
+let programMap = new Map();
+let maintenanceMap = new Map();
+let cctRecordMap = new Map();
+let turnCatalogMap = new Map();
+let currentItems = [];
+let currentCcts = [];
+let markersLayer;
+let subsidyLayer;
+let fractureLayer;
+let alcaldiasLayer;
+let hasFitResult = false;
+
+const EXCLUDED_LEVEL_FILTERS = new Set(['Baja', 'Capacitación', 'CAPEP', 'Especial - otro', 'Para adultos']);
+
+const map = L.map('map', {zoomControl:false, preferCanvas:true, minZoom:9}).setView([19.35, -99.13], 10);
 L.control.zoom({position:'topright'}).addTo(map);
+
+const lightBasemapPane = map.createPane('infraBasemapLight');
+lightBasemapPane.style.zIndex = '200';
+const darkBasemapPane = map.createPane('infraBasemapDark');
+darkBasemapPane.style.zIndex = '200';
+darkBasemapPane.style.filter = 'brightness(.62) contrast(1.3) saturate(.55) hue-rotate(180deg) invert(1)';
+const esriBasemapUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+const esriAttribution = 'Tiles &copy; Esri &mdash; Source: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), NOSTRA, &copy; OpenStreetMap contributors, and the GIS User Community';
 const baseLayers = {
-  'Mapa claro': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom:20, attribution:'© OpenStreetMap © CARTO'}),
-  'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap'}),
-  'Satélite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Tiles © Esri'}),
-  'Mapa oscuro': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:20, attribution:'© OpenStreetMap © CARTO'})
+  'Claro': L.tileLayer(esriBasemapUrl, {
+    maxZoom: 20, attribution: esriAttribution, pane: 'infraBasemapLight'
+  }),
+  'Oscuro': L.tileLayer(esriBasemapUrl, {
+    maxZoom: 20, attribution: esriAttribution, pane: 'infraBasemapDark'
+  })
 };
-baseLayers['Mapa claro'].addTo(map);
+baseLayers.Claro.addTo(map);
 L.control.layers(baseLayers, {}, {collapsed:true, position:'bottomright'}).addTo(map);
-schoolLayer.addTo(map);
 
-document.addEventListener('DOMContentLoaded', init);
+bootstrap();
 
-async function init() {
-  buildMaintenanceMenu();
-  bindUI();
+async function bootstrap() {
   try {
-    const [schoolGeo, alcaldias, subsidencias, fracturas, mantenimiento, reforzamiento, famPotenciado, fam2026, alcaldiaApoyo, programas] = await Promise.all([
-      fetchJson(DATA.schools), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento),
-      fetchJson(DATA.mantenimiento), fetchJson(DATA.reforzamiento), fetchJson(DATA.famPotenciado), fetchJson(DATA.fam2026),
-      fetchJson(DATA.alcaldiaApoyo), fetchJson(DATA.programas)
+    const [main, turnCatalog, alcaldias, subsidencias, fracturamiento, conteoInmuebles, detalleObra] = await Promise.all([
+      loadMainData(), fetchJson(DATA.turnos), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento), fetchJson(DATA.conteoInmuebles), fetchJson(DATA.detalleObra)
     ]);
-    programRows = programas;
-    allSchools = (schoolGeo.features || []).map(normalizeFeature).filter(Boolean);
-    mergeProgramOnlySchools(allSchools, programRows);
-    joinPrograms(allSchools, programRows);
-    joinImprovements(allSchools, mantenimiento, reforzamiento, famPotenciado, fam2026, alcaldiaApoyo, programRows);
-    alcaldiasGeoJSON = alcaldias;
-    subsidenciasGeoJSON = subsidencias;
-    fracturamientoGeoJSON = fracturas;
-    buildProgramCatalog();
-    buildProgramMenu();
-    populateFilters();
-    drawBoundaries();
-    drawExtraLayers();
+    dataset = InmueblesMaster.apply(CctMaster.merge(main, turnCatalog), conteoInmuebles);
+    dataset.metadata.cct_con_indice_final = dataset.ccts.filter(record => Number.isFinite(record.indice_prioridad_final)).length;
+    dataset.programas = dataset.programas.map(program => ({...program, count:dataset.ccts.filter(record => record.programas.includes(program.id)).length}));
+    dataset.inmuebles_conteo = conteoInmuebles;
+    detalleObraPorCct = detalleObra;
+    programMap = new Map(dataset.programas.map(program => [program.id, program]));
+    maintenanceMap = new Map(dataset.mantenimiento_variables.map(variable => [variable.id, variable]));
+    cctRecordMap = new Map(dataset.ccts.map(record => [record.cct, record]));
+    turnCatalogMap = new Map(Object.entries(turnCatalog.ccts || {}));
+    markersLayer = L.layerGroup().addTo(map);
+    configureBoundary(alcaldias);
+    configureTerritorialLayers(subsidencias, fracturamiento);
+    buildControls();
+    bindEvents();
     restoreState();
-    initialized = true;
-    applyFilters();
-    setStatus('');
+    render(true);
+    q('mapStatus').classList.add('hidden');
   } catch (error) {
     console.error(error);
-    setStatus('No fue posible cargar la información del visor. Verifica que se publique mediante un servidor web.', true);
+    q('mapStatus').textContent = `No fue posible cargar la información del visor: ${error.message}`;
+    q('mapStatus').classList.add('error');
   }
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path, {cache:'no-store'});
-  if (!response.ok) throw new Error(`No se pudo cargar ${path}`);
+async function loadMainData() {
+  const manifest = await fetchJson(DATA.main);
+  if (!Array.isArray(manifest.partes_datos) || !manifest.partes_datos.length) return manifest;
+  const [parts, supports] = await Promise.all([
+    Promise.all(manifest.partes_datos.map(file => fetchJson(`data/${file}`))),
+    fetchJson(DATA.supports)
+  ]);
+  const updates = Array.isArray(supports.actualizaciones_programas) ? supports.actualizaciones_programas : [];
+  const attachSupportDetails = (items, collection) => items.map(item => {
+    const details = [...(supports[collection]?.[item.uid] || [])];
+    const matchingUpdates = updates.filter(update => item.ccts.includes(update.cct));
+    matchingUpdates.forEach(update => {
+      if (!details.some(detail => detail.programa === update.programa_nombre && detail.ejecutor === update.ejecutor)) {
+        details.push({programa:update.programa_nombre, ejecutor:update.ejecutor});
+      }
+    });
+    const updatedItem = matchingUpdates.reduce((updated, update) => ({
+      ...updated,
+      programas: [...new Set([...updated.programas, update.programa_id])],
+      mejoras_previas: [...new Set([...updated.mejoras_previas, update.programa_label])],
+      mejoras_previas_ids: [...new Set([...updated.mejoras_previas_ids, update.programa_id])],
+      tuvo_apoyo_previo: true,
+      apoyos_recibidos_detalle: details
+    }), {...item});
+    if (updatedItem.programas.includes('ilife_180_2026')) {
+      updatedItem.mejoras_previas = updatedItem.mejoras_previas.map(label => label === '180 ILIFE · 2026' ? '181 ILIFE · 2026' : label);
+    }
+    return {...updatedItem, apoyos_recibidos_detalle:details};
+  });
+  const inmuebles = attachSupportDetails(parts.flatMap(part => part.inmuebles || []), 'inmuebles');
+  const ccts = attachSupportDetails(parts.flatMap(part => part.ccts || []), 'ccts');
+  const programas = manifest.programas.map(program => ({
+    ...program,
+    label: program.id === 'ilife_180_2026' ? '181 ILIFE · 2026' : program.label,
+    count: program.id === 'ilife_180_2026' ? 181 : program.count
+  }));
+  return {
+    ...manifest,
+    programas,
+    inmuebles,
+    ccts
+  };
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, {cache:'no-store'});
+  if (!response.ok) throw new Error(`Error ${response.status} al cargar ${url}`);
   return response.json();
 }
 
-function normalizeFeature(feature, index) {
-  const p = feature.properties || {};
-  const coords = feature.geometry?.coordinates || [];
-  return normalizeSchool(p, Number(coords[1] ?? p[FIELDS.y]), Number(coords[0] ?? p[FIELDS.x]), index, false);
+const OFFICIAL_ALCALDIAS = new Map([
+  ['ALVARO OBREGON','Álvaro Obregón'], ['AZCAPOTZALCO','Azcapotzalco'],
+  ['BENITO JUAREZ','Benito Juárez'], ['COYOACAN','Coyoacán'],
+  ['CUAJIMALPA DE MORELOS','Cuajimalpa de Morelos'], ['CUAUHTEMOC','Cuauhtémoc'],
+  ['GUSTAVO A. MADERO','Gustavo A. Madero'], ['IZTACALCO','Iztacalco'],
+  ['IZTAPALAPA','Iztapalapa'], ['LA MAGDALENA CONTRERAS','La Magdalena Contreras'],
+  ['MIGUEL HIDALGO','Miguel Hidalgo'], ['MILPA ALTA','Milpa Alta'],
+  ['TLAHUAC','Tláhuac'], ['TLALPAN','Tlalpan'],
+  ['VENUSTIANO CARRANZA','Venustiano Carranza'], ['XOCHIMILCO','Xochimilco']
+]);
+
+const OFFICIAL_LEVELS = new Map([
+  ['primaria','Primaria'], ['preescolar','Preescolar'], ['secundaria','Secundaria'],
+  ['educación inicial','Educación inicial'], ['especial','Especial'], ['inicial','Educación inicial'],
+  ['especial - cam','Especial'], ['capep','CAPEP'], ['normal','Normal'],
+  ['preescolar - comunitario','Preescolar - comunitario'],
+  ['primaria - comunitaria','Primaria - comunitaria'],
+  ['secundaria - comunitaria','Secundaria - comunitaria'],
+  ['adultos - primaria','Adultos - primaria'], ['adultos - secundaria','Adultos - secundaria'],
+  ['baja','Baja'], ['para adultos','Para adultos'], ['capacitación','Capacitación'],
+  ['especial - otro','Especial - otro']
+]);
+
+function sentenceCase(value) {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-MX');
+  return text ? text.charAt(0).toLocaleUpperCase('es-MX') + text.slice(1) : '';
 }
 
-function normalizeSchool(p, lat, lon, index, programOnly) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const needs = NEEDS.filter(field => Number(p[field]) === 1);
-  const indice = Number.isFinite(Number(p[FIELDS.indice])) ? Number(p[FIELDS.indice]) : needs.length;
-  return {
-    id: clean(p.idinmueble) || `escuela-${index}`, lat, lon, props:p,
-    nombre: clean(p[FIELDS.nombre]) || clean(p.nombre) || 'Escuela sin nombre',
-    alcaldia: normalizeAlcaldia(p[FIELDS.alcaldia] || p.alcaldia),
-    nivel: clean(p[FIELDS.nivel] || p.nivel),
-    ccts: (programOnly ? [p.cct] : FIELDS.ccts.map(field => p[field])).map(normalizeCCT).filter(Boolean),
-    indice, clasificacion: classifyIndex(indice), needs,
-    subsidenciaNivel: Number(p.subsidencia_nivel) || null,
-    subsidenciaClase: clean(p.subsidencia_clase),
-    distFractura: Number.isFinite(Number(p.dist_fractura_m)) ? Number(p.dist_fractura_m) : null,
-    programOnly, programs:[], improvements:{}, marker:null
-  };
+function canonicalAlcaldia(value) {
+  return OFFICIAL_ALCALDIAS.get(clean(value)) || sentenceCase(value);
 }
 
-function mergeProgramOnlySchools(schools, rows) {
-  const known = new Set(schools.flatMap(s => s.ccts));
-  const missing = new Map();
-  rows.forEach(row => {
-    if (!known.has(row.cct) && !missing.has(row.cct)) missing.set(row.cct, row);
-  });
-  missing.forEach((row, cct) => {
-    const props = {cct, nombre:row.nombre, inmueble:row.nombre, alcaldia:row.alcaldia, nivel:row.nivel, principal:row.nivel, domicilio:row.domicilio, localidad:row.localidad, colonia:row.colonia};
-    const school = normalizeSchool(props, Number(row.lat), Number(row.lon), `programa-${cct}`, true);
-    if (school) schools.push(school);
-  });
+function canonicalLevel(value) {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ');
+  return OFFICIAL_LEVELS.get(text.toLocaleLowerCase('es-MX')) || sentenceCase(text);
 }
 
-function joinPrograms(schools, rows) {
-  const index = new Map();
-  rows.forEach(row => {
-    if (!index.has(row.cct)) index.set(row.cct, []);
-    index.get(row.cct).push(row);
-  });
-  schools.forEach(school => {
-    const uniqueRows = new Map();
-    school.ccts.flatMap(cct => index.get(cct) || []).forEach(row => uniqueRows.set(`${row.cct}|${row.proyecto_id}`, row));
-    school.programs = [...uniqueRows.values()];
-  });
-}
-
-function joinImprovements(schools, maintenance, reinforcement, famPotenciado, fam2026, alcaldiaApoyo, programs) {
-  const byCct = rows => {
-    const result = new Map();
-    rows.forEach(row => { const cct = normalizeCCT(row.cct); if (cct) result.set(cct, row); });
-    return result;
-  };
-  const mm = byCct(maintenance), rr = byCct(reinforcement), fp = byCct(famPotenciado), f26 = byCct(fam2026), aa = byCct(alcaldiaApoyo);
-  const p25 = new Set(programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes('(2025)')).map(row => row.cct));
-  const p26 = new Set(programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes('(2026)')).map(row => row.cct));
-  schools.forEach(school => {
-    const first = map => school.ccts.map(cct => map.get(cct)).find(Boolean) || null;
-    const mantenimiento = first(mm);
-    const reforzamiento = first(rr);
-    school.improvementDetails = {mantenimiento, reforzamiento, famPotenciado:first(fp), fam2026:first(f26), alcaldiaApoyo:first(aa)};
-    school.improvements = {
-      fam_regular: Boolean(mantenimiento && normalize(mantenimiento.responsable).includes('ilife')),
-      programa_123_2025: school.ccts.some(cct => p25.has(cct)),
-      fam_potenciado: Boolean(school.improvementDetails.famPotenciado),
-      fam_potenciado_basico_2026: Boolean(school.improvementDetails.fam2026),
-      fam_reforzamiento: Boolean(reforzamiento),
-      programa_123_2026: school.ccts.some(cct => p26.has(cct)),
-      alcaldia_apoyo: Boolean(school.improvementDetails.alcaldiaApoyo),
-      ambas: Boolean(mantenimiento && reforzamiento)
+function normalizeDatasetCategories(main, turnCatalog = {}) {
+  const normalizeItem = item => {
+    let niveles = unique((item.niveles || [item.nivel]).map(canonicalLevel));
+    if (item.tipo === 'cct' && niveles.includes('Para adultos')) {
+      const adultLevels = unique((turnCatalog[item.cct] || [])
+        .map(turn => canonicalLevel(turn.nivel))
+        .filter(level => level === 'Adultos - primaria' || level === 'Adultos - secundaria'));
+      if (adultLevels.length) niveles = unique([...niveles.filter(level => level !== 'Para adultos'), ...adultLevels]);
+    }
+    return {
+      ...item,
+      alcaldia: canonicalAlcaldia(item.alcaldia),
+      nivel: niveles[0] || canonicalLevel(item.nivel),
+      niveles
     };
+  };
+  const ccts = main.ccts.map(normalizeItem);
+  const cctByKey = new Map(ccts.map(item => [item.cct, item]));
+  const inmuebles = main.inmuebles.map(item => {
+    const normalized = normalizeItem(item);
+    if (!normalized.niveles.includes('Para adultos')) return normalized;
+    const adultLevels = unique(normalized.ccts
+      .flatMap(cct => cctByKey.get(cct)?.niveles || [])
+      .filter(level => level === 'Adultos - primaria' || level === 'Adultos - secundaria'));
+    return adultLevels.length
+      ? {...normalized, nivel:adultLevels[0], niveles:adultLevels}
+      : normalized;
+  });
+  return {
+    ...main,
+    inmuebles,
+    ccts
+  };
+}
+
+function configureBoundary(geojson) {
+  alcaldiasLayer = L.geoJSON(geojson, {
+    style: {color:'#315b7d', weight:1.1, fillColor:'#dbe7ef', fillOpacity:.05, dashArray:'4 3'},
+    interactive:false
+  }).addTo(map);
+  map.fitBounds(alcaldiasLayer.getBounds(), {padding:[24,24]});
+  hasFitResult = true;
+}
+
+function configureTerritorialLayers(subsidencias, fracturamiento) {
+  const colors = {1:'#006837', 2:'#78c679', 3:'#ffd166', 4:'#f97316', 5:'#dc2626'};
+  subsidyLayer = L.geoJSON(subsidencias, {
+    style: feature => ({color:colors[feature.properties.gridcode] || '#64748b', fillColor:colors[feature.properties.gridcode] || '#64748b', fillOpacity:.3, weight:.35}),
+    interactive:false
+  });
+  fractureLayer = L.geoJSON(fracturamiento, {
+    style: {color:'#a21caf', weight:2.2, opacity:.85},
+    onEachFeature: (feature, layer) => {
+      const type = feature.properties?.TIPO || 'Fractura cartografiada';
+      layer.bindTooltip(escapeHtml(type), {className:'fracture-tooltip', sticky:true});
+    }
   });
 }
 
-function buildProgramCatalog() {
-  const map = new Map();
-  programRows.forEach(row => {
-    if (!map.has(row.proyecto_id)) map.set(row.proyecto_id, {id:row.proyecto_id, label:row.proyecto, program:row.programa, count:0});
-    map.get(row.proyecto_id).count += 1;
-  });
-  programCatalog = [...map.values()].sort((a,b) => a.program.localeCompare(b.program, 'es') || a.label.localeCompare(b.label, 'es'));
+function buildControls() {
+  const all = [...dataset.inmuebles, ...dataset.ccts];
+  fillSelect(q('filtroAlcaldia'), unique(all.flatMap(item => item.alcaldia || [])));
+  fillSelect(q('filtroNivel'), unique(all.flatMap(item => item.niveles || [item.nivel])).filter(level => !EXCLUDED_LEVEL_FILTERS.has(level)));
+  q('programFilters').innerHTML = dataset.programas.map(program =>
+    `<label class="inline-check"><input type="checkbox" value="${escapeHtml(program.id)}"><span><i class="program-dot" style="--program-color:${escapeHtml(program.color)}"></i>${escapeHtml(program.label)} <small>(${formatNumber(program.count)})</small></span></label>`
+  ).join('');
+  q('maintenanceFilters').innerHTML = dataset.mantenimiento_variables.map(variable =>
+    `<label class="inline-check" title="${escapeHtml(variable.nombre_completo)}"><input type="checkbox" value="${escapeHtml(variable.id)}"><span>${escapeHtml(variable.nombre)} <small>· ${variable.peso} pts</small></span></label>`
+  ).join('');
+  refreshDatalists();
+  q('coverageNote').textContent = `${formatNumber(dataset.metadata.cct_con_indice_final)} de ${formatNumber(dataset.metadata.total_cct)} CCT tienen índice final completo · ${formatNumber(dataset.metadata.registros_sin_coordenadas)} registros fuente sin coordenadas no se dibujan.${dataset.ccts.some(record => record.alerta_ubicacion) ? ` ${formatNumber(dataset.ccts.filter(record => record.alerta_ubicacion).length)} CCT tienen ubicación pendiente de verificación.` : ''}`;
 }
 
-function buildProgramMenu() {
-  const groups = new Map();
-  programCatalog.forEach(item => {
-    if (!groups.has(item.program)) groups.set(item.program, []);
-    groups.get(item.program).push(item);
-  });
-  q('programFilters').innerHTML = [...groups.entries()].map(([program, projects], index) => `
-    <details class="program-group" ${index < 2 ? 'open' : ''}>
-      <summary><span>${escapeHtml(program)}</span><small>${projects.length} proyecto${projects.length === 1 ? '' : 's'}</small></summary>
-      <div>${projects.map(project => `<label class="inline-check program-option" data-search="${escapeAttr(normalize(`${program} ${project.label}`))}"><input type="checkbox" value="${escapeAttr(project.id)}"><span>${escapeHtml(project.label)} <em>${project.count.toLocaleString('es-MX')} CCT</em></span></label>`).join('')}</div>
-    </details>`).join('');
-  q('programFilters').addEventListener('change', applyFilters);
+function fillSelect(select, values) {
+  values.forEach(value => select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`));
 }
 
-function buildMaintenanceMenu() {
-  q('maintenanceFilters').innerHTML = NEEDS.map(field => `<label><input type="checkbox" value="${field}"><span>${NEED_LABELS[field]}</span></label>`).join('');
+function unique(values) {
+  return [...new Set(values.filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'es'));
 }
 
-function bindUI() {
-  q('filtroAlcaldia').addEventListener('change', () => { applyFilters(); zoomToAlcaldia(); });
-  q('filtroNivel').addEventListener('change', applyFilters);
-  q('buscarCCT').addEventListener('input', debounce(() => { applyFilters(); zoomToMatch('cct'); }, 180));
-  q('buscarNombre').addEventListener('input', debounce(() => { applyFilters(); zoomToMatch('nombre'); }, 180));
-  q('maintenanceFilters').addEventListener('change', applyFilters);
-  q('improvementFilters').addEventListener('change', applyFilters);
-  document.querySelectorAll('input[name="riskMode"]').forEach(input => input.addEventListener('change', applyFilters));
-  q('selectAllMaintenance').onclick = () => setChecks('#maintenanceFilters input', true);
-  q('clearMaintenance').onclick = () => setChecks('#maintenanceFilters input', false);
-  q('selectAllMejoras').onclick = () => setChecks('#improvementFilters input', true);
-  q('clearMejoras').onclick = () => setChecks('#improvementFilters input', false);
+function activeMode() {
+  return document.querySelector('input[name="viewMode"]:checked')?.value || 'inmueble';
+}
+
+function activeItems() {
+  return dataset.inmuebles;
+}
+
+function refreshDatalists() {
+  const items = activeItems();
+  q('listaCCT').innerHTML = unique(items.flatMap(item => item.ccts)).map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
+  q('listaNombres').innerHTML = unique(items.flatMap(item => item.nombres)).map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
+}
+
+function bindEvents() {
+  document.querySelectorAll('input[name="viewMode"]').forEach(input => input.addEventListener('change', () => {
+    hasFitResult = false;
+    refreshDatalists();
+    render(true);
+  }));
+  ['filtroAlcaldia','filtroNivel','buscarCCT','buscarNombre','rankMin','rankMax','toggleSchools']
+    .forEach(id => q(id).addEventListener(id.startsWith('buscar') || id.startsWith('rank') ? 'input' : 'change', () => render(false)));
+  bindSearchFocus(q('buscarCCT'), 'cct');
+  bindSearchFocus(q('buscarNombre'), 'nombre');
+  q('priorityFilters').addEventListener('change', () => render(false));
+  document.querySelectorAll('input[name="riskMode"]').forEach(input => input.addEventListener('change', () => render(false)));
+  q('programFilters').addEventListener('change', () => render(false));
+  q('maintenanceFilters').addEventListener('change', () => render(false));
   q('selectAllProgramas').onclick = () => setChecks('#programFilters input', true);
   q('clearProgramas').onclick = () => setChecks('#programFilters input', false);
-  q('clearRiesgos').onclick = () => { document.querySelectorAll('input[name="riskMode"]').forEach(i => i.checked = false); applyFilters(); };
-  q('btnLimpiar').onclick = clearAllFilters;
-  q('modeMaintenance').onclick = () => { clearThematicSelections(); applyFilters(); };
-  q('toggleSchools').onchange = event => { schoolsVisible = event.target.checked; saveState(); updateVisibility(); };
-  q('toggleSubsidencias').onchange = event => { toggleLayer(subsidenciaLayer, event.target.checked); q('subsidenciaLegend').classList.toggle('hidden', !event.target.checked); saveState(); };
-  q('toggleFracturamiento').onchange = event => { toggleLayer(fracturamientoLayer, event.target.checked); saveState(); };
-  q('programSearch').addEventListener('input', filterProgramMenu);
-  q('toggleMejoras').onclick = () => toggleMenu('mejorasBody','mejorasArrow','toggleMejoras');
+  q('selectAllMantenimiento').onclick = () => setChecks('#maintenanceFilters input', true);
+  q('clearMantenimiento').onclick = () => setChecks('#maintenanceFilters input', false);
+  q('selectAllPrioridades').onclick = () => setChecks('#priorityFilters input', true);
+  q('clearPrioridades').onclick = () => setChecks('#priorityFilters input', false);
+  q('clearRiesgos').onclick = () => {
+    document.querySelectorAll('input[name="riskMode"]').forEach(input => input.checked = false);
+    render(false);
+  };
+  q('btnLimpiar').onclick = clearFilters;
+  q('toggleSubsidencias').onchange = toggleSubsidencies;
+  q('toggleFracturamiento').onchange = toggleFractures;
   q('toggleProgramas').onclick = () => toggleMenu('programasBody','programasArrow','toggleProgramas');
+  q('toggleMantenimiento').onclick = () => toggleMenu('mantenimientoBody','mantenimientoArrow','toggleMantenimiento');
   q('toggleRiesgos').onclick = () => toggleMenu('riesgosBody','riesgosArrow','toggleRiesgos');
-  q('toggleSidebar').onclick = collapseSidebar;
-  q('showSidebar').onclick = expandSidebar;
+  q('toggleLegend').onclick = () => toggleLegend('legendBody','toggleLegend');
+  q('toggleSubLegend').onclick = () => toggleLegend('subLegendBody','toggleSubLegend');
+  q('toggleSidebar').onclick = hideSidebar;
+  q('showSidebar').onclick = showSidebar;
   q('closeDetail').onclick = () => q('detailPanel').classList.remove('open');
-  q('toggleLegend').onclick = () => toggleBox('legendBody','toggleLegend');
-  q('toggleSubLegend').onclick = () => toggleBox('subLegendBody','toggleSubLegend');
-  q('statsLink').onclick = saveState;
-  map.on('zoomend moveend', updateVisibility);
+  q('fullscreenButton').onclick = toggleFullscreen;
+  document.addEventListener('fullscreenchange', syncFullscreen);
+  window.addEventListener('resize', () => map.invalidateSize());
 }
 
 function setChecks(selector, checked) {
-  document.querySelectorAll(selector).forEach(input => { input.checked = checked; });
-  applyFilters();
+  document.querySelectorAll(selector).forEach(input => input.checked = checked);
+  render(false);
 }
 
-function clearThematicSelections() {
-  document.querySelectorAll('#maintenanceFilters input,#improvementFilters input,#programFilters input,input[name="riskMode"]').forEach(input => { input.checked = false; });
+function toggleMenu(bodyId, arrowId, buttonId) {
+  const body = q(bodyId);
+  const open = body.classList.toggle('hidden') === false;
+  q(arrowId).textContent = open ? '⌄' : '›';
+  q(buttonId).setAttribute('aria-expanded', String(open));
 }
 
-function clearAllFilters() {
-  q('filtroAlcaldia').value = '';
-  q('filtroNivel').value = '';
-  q('buscarCCT').value = '';
-  q('buscarNombre').value = '';
-  q('programSearch').value = '';
-  clearThematicSelections();
-  filterProgramMenu();
-  applyFilters();
-  if (alcaldiaBoundaryLayer) map.fitBounds(alcaldiaBoundaryLayer.getBounds(), {padding:[15,15]});
+function toggleLegend(bodyId, buttonId) {
+  const body = q(bodyId);
+  body.classList.toggle('hidden');
+  q(buttonId).textContent = body.classList.contains('hidden') ? '+' : '−';
 }
 
-function applyFilters() {
-  if (!initialized) return;
-  const alcaldia = q('filtroAlcaldia').value;
-  const nivel = q('filtroNivel').value;
-  const cct = normalizeCCT(q('buscarCCT').value);
-  const nombre = normalize(q('buscarNombre').value);
-  const needs = checkedValues('#maintenanceFilters input');
-  const improvements = checkedValues('#improvementFilters input');
-  const projects = checkedValues('#programFilters input');
-  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
-
-  filteredSchools = allSchools.filter(school => {
-    if (alcaldia && school.alcaldia !== alcaldia) return false;
-    if (nivel && school.nivel !== nivel) return false;
-    if (cct && !school.ccts.some(value => value.includes(cct))) return false;
-    if (nombre && !normalize(school.nombre).includes(nombre)) return false;
-    if (school.programOnly && projects.length === 0) return false;
-    if (needs.length && !needs.every(field => school.needs.includes(field))) return false;
-    if (improvements.length && !improvements.some(key => school.improvements[key])) return false;
-    if (projects.length && !school.programs.some(row => projects.includes(row.proyecto_id))) return false;
-    if (risk === 'obs_fractura' && !hasFracture(school)) return false;
-    if (risk === 'obs_subsidencia' && !hasSubsidence(school)) return false;
-    if (risk === 'obs_combinada' && !(hasFracture(school) && hasSubsidence(school))) return false;
-    return true;
-  });
-
-  q('programSelectionCount').textContent = projects.length;
-  q('modeMaintenance').classList.toggle('active', !improvements.length && !projects.length && !risk);
-  updateCrossSummary(needs, improvements, projects, risk);
-  saveState();
-  updateMap();
-}
-
-function updateCrossSummary(needs, improvements, projects, risk) {
-  const parts = [];
-  if (projects.length) parts.push(`${projects.length} proyecto${projects.length === 1 ? '' : 's'}`);
-  if (improvements.length) parts.push(`${improvements.length} mejora${improvements.length === 1 ? '' : 's'}`);
-  if (needs.length) parts.push(`${needs.length} variable${needs.length === 1 ? '' : 's'} de mantenimiento`);
-  if (risk) parts.push('1 observación territorial');
-  q('activeCrossSummary').textContent = parts.length ? `Cruce activo: ${parts.join(' + ')}.` : 'Sin cruces temáticos activos.';
-}
-
-function updateMap() {
-  schoolLayer.clearLayers();
-  if (map.getZoom() > 10) drawSchools();
-  drawSummary();
-  updateStats();
-  renderLegend();
-  updateVisibility();
-}
-
-function drawSchools() {
-  schoolLayer.clearLayers();
-  filteredSchools.forEach(school => {
-    const marker = L.circleMarker([school.lat, school.lon], {radius:7, color:borderColor(school), weight:2, fillColor:schoolColor(school), fillOpacity:.9});
-    marker.bindPopup(buildPopup(school), {maxWidth:340});
-    marker.on('click', () => openDetail(school));
-    school.marker = marker;
-    schoolLayer.addLayer(marker);
-  });
-}
-
-function drawSummary() {
-  summaryLayer.clearLayers();
-  const groups = new Map();
-  filteredSchools.forEach(school => {
-    if (!groups.has(school.alcaldia)) groups.set(school.alcaldia, []);
-    groups.get(school.alcaldia).push(school);
-  });
-  groups.forEach((schools, alcaldia) => {
-    if (!alcaldia) return;
-    const lat = schools.reduce((sum,s) => sum + s.lat, 0) / schools.length;
-    const lon = schools.reduce((sum,s) => sum + s.lon, 0) / schools.length;
-    const size = Math.max(34, Math.min(64, 28 + Math.sqrt(schools.length) * 3.5));
-    const icon = L.divIcon({className:'', html:`<div class="summary-marker" style="width:${size}px;height:${size}px">${schools.length}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2]});
-    L.marker([lat,lon], {icon, title:`${alcaldia}: ${schools.length} escuelas`}).bindTooltip(`${escapeHtml(alcaldia)}: ${schools.length.toLocaleString('es-MX')} escuelas`).on('click', () => fitSchools(schools, 12)).addTo(summaryLayer);
-  });
-}
-
-function updateVisibility() {
-  map.removeLayer(schoolLayer);
-  map.removeLayer(summaryLayer);
-  if (!schoolsVisible) return;
-  if (map.getZoom() <= 10 && !q('buscarCCT').value && !q('buscarNombre').value) summaryLayer.addTo(map);
-  else {
-    if (schoolLayer.getLayers().length === 0 && filteredSchools.length) drawSchools();
-    schoolLayer.addTo(map);
+function toggleSubsidencies() {
+  if (q('toggleSubsidencias').checked) {
+    subsidyLayer.addTo(map);
+    subsidyLayer.bringToBack();
+    if (alcaldiasLayer) alcaldiasLayer.bringToBack();
+    q('subsidenciaLegend').classList.remove('hidden');
+  } else {
+    map.removeLayer(subsidyLayer);
+    q('subsidenciaLegend').classList.add('hidden');
   }
 }
 
-function schoolColor(school) {
-  const projects = checkedValues('#programFilters input');
-  const improvements = checkedValues('#improvementFilters input');
-  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
-  if ((projects.length && improvements.length) || (projects.length && checkedValues('#maintenanceFilters input').length) || (improvements.length && checkedValues('#maintenanceFilters input').length)) return '#111827';
-  if (projects.length) {
-    const match = school.programs.find(row => projects.includes(row.proyecto_id));
-    return PROGRAM_COLORS[Math.max(0, programCatalog.findIndex(p => p.id === match?.proyecto_id)) % PROGRAM_COLORS.length];
-  }
-  if (improvements.length) {
-    const key = improvements.find(value => school.improvements[value]);
-    return IMPROVEMENTS[key]?.color || '#334155';
-  }
-  if (risk) return OBS_COLORS[risk];
-  return CLASS_COLORS[school.clasificacion];
+function toggleFractures() {
+  if (q('toggleFracturamiento').checked) fractureLayer.addTo(map);
+  else map.removeLayer(fractureLayer);
 }
 
-function borderColor(school) {
-  if (school.improvementDetails?.reforzamiento) return '#5b21b6';
-  if (school.programs.length) return '#0f172a';
-  return '#fff';
+function selectedPrograms() {
+  return [...document.querySelectorAll('#programFilters input:checked')].map(input => input.value);
 }
 
-function buildPopup(school) {
-  const tags = [];
-  school.programs.forEach(row => tags.push(`<span class="mini-tag blue">${escapeHtml(row.proyecto)}</span>`));
-  Object.entries(school.improvements).filter(([,yes]) => yes).forEach(([key]) => tags.push(`<span class="mini-tag teal">${escapeHtml(IMPROVEMENTS[key].label)}</span>`));
-  return `<div class="popup-title">${escapeHtml(school.nombre)}</div><div class="popup-meta">CCT: ${escapeHtml(school.ccts.join(', ') || 'No registrado')}<br>Alcaldía: ${escapeHtml(school.alcaldia || 'No registrada')}<br>Atenciones de revisión: <strong>${school.indice}</strong></div><div class="popup-flags">${tags.slice(0,6).join('')}${tags.length > 6 ? `<span class="mini-tag">+${tags.length-6}</span>` : ''}</div>`;
+function selectedMaintenance() {
+  return [...document.querySelectorAll('#maintenanceFilters input:checked')].map(input => input.value);
 }
 
-function openDetail(school) {
-  q('detailPanel').classList.add('open');
-  q('detailTitle').textContent = school.nombre;
-  const needs = school.needs.map(field => `<li><span>${escapeHtml(NEED_LABELS[field])}</span></li>`).join('') || '<li>Sin variables registradas.</li>';
-  const improvements = renderImprovements(school);
-  const programs = school.programs.map(row => `<div class="info-card blue-card"><div class="program-parent">${escapeHtml(row.programa)}</div><h3>${escapeHtml(row.proyecto)}</h3><dl>${detailRow('CCT',row.cct)}${detailRow('Nivel',row.nivel)}${detailRow('Turno(s)',row.turno)}${detailRow('Domicilio',row.domicilio)}${detailRow('Localidad',row.localidad)}${detailRow('Detalle',row.detalle)}</dl></div>`).join('') || '<p class="muted-box">No tiene proyectos registrados.</p>';
-  q('detailContent').innerHTML = `<div class="detail-tabs"><button class="tab-btn active" data-tab="general">General</button><button class="tab-btn" data-tab="mantenimiento">Mantenimiento</button><button class="tab-btn" data-tab="mejoras">Mejoras</button><button class="tab-btn" data-tab="programas">Programas</button><button class="tab-btn" data-tab="riesgos">Observaciones</button></div>
-    <div class="tab-pane active" data-pane="general"><dl>${detailRow('CCT',school.ccts.join(', '))}${detailRow('Alcaldía',school.alcaldia)}${detailRow('Nivel',school.nivel)}${detailRow('Domicilio',school.props.bm_domicilio_principal || school.props.domicilio)}${detailRow('Localidad / colonia',school.props.bm_localidad || school.props.localidad || school.props.colonia)}<dt>Atenciones de revisión</dt><dd>${school.indice} · ${school.clasificacion}</dd></dl></div>
-    <div class="tab-pane" data-pane="mantenimiento"><ul class="need-list">${needs}</ul></div>
-    <div class="tab-pane" data-pane="mejoras">${improvements}</div>
-    <div class="tab-pane" data-pane="programas">${programs}</div>
-    <div class="tab-pane" data-pane="riesgos">${riskDetail(school)}</div>`;
-  activateTabs();
+function selectedPriorities() {
+  return [...document.querySelectorAll('#priorityFilters input:checked')].map(input => input.value);
 }
 
-function renderImprovements(school) {
-  const cards = [];
-  const details = school.improvementDetails;
-  if (school.improvements.fam_regular) cards.push(improvementCard('FAM Regular 2025', details.mantenimiento));
-  if (school.improvements.programa_123_2025) cards.push(improvementCard('1, 2, 3 por mi Escuela 2025', projectDetailsByYear(school, '(2025)')));
-  if (school.improvements.fam_potenciado) cards.push(improvementCard('FAM Potenciado 2025', details.famPotenciado));
-  if (school.improvements.fam_potenciado_basico_2026) cards.push(improvementCard('FAM Potenciado + FAM Básico 2026', details.fam2026));
-  if (school.improvements.fam_reforzamiento) cards.push(improvementCard('FAM Reforzamiento estructural', details.reforzamiento));
-  if (school.improvements.programa_123_2026) cards.push(improvementCard('1, 2, 3 por mi Escuela 2026', projectDetailsByYear(school, '(2026)')));
-  if (school.improvements.alcaldia_apoyo) cards.push(improvementCard('Intervención de Alcaldía', details.alcaldiaApoyo));
-  return cards.join('') || '<p class="muted-box">No tiene mejoras registradas en las bases incorporadas.</p>';
+function selectedRisk() {
+  return document.querySelector('input[name="riskMode"]:checked')?.value || '';
 }
 
-function projectDetailsByYear(school, year) {
-  return school.programs.filter(row => normalize(row.programa) === '1 2 3 por mi escuela' && row.proyecto.includes(year)).map(row => ({proyecto:row.proyecto, detalle:row.detalle}));
-}
-
-function improvementCard(title, data) {
-  const records = Array.isArray(data) ? data : [data];
-  const content = records.filter(Boolean).map(record => {
-    const entries = Object.entries(record).filter(([key,value]) => value && !['escuela','cct'].includes(key)).slice(0,9);
-    return `<dl>${entries.map(([key,value]) => detailRow(humanize(key), value)).join('')}</dl>`;
-  }).join('');
-  return `<div class="info-card teal-card"><h3>${escapeHtml(title)}</h3>${content}</div>`;
-}
-
-function riskDetail(school) {
-  const rows = [];
-  if (hasFracture(school)) rows.push(`<div class="observation-card"><strong>Cercanía a fracturamiento</strong><p>Distancia aproximada: ${Math.round(school.distFractura).toLocaleString('es-MX')} m.</p></div>`);
-  if (hasSubsidence(school)) rows.push(`<div class="observation-card"><strong>Subsidencia alta</strong><p>Clasificación registrada: ${escapeHtml(school.subsidenciaClase || String(school.subsidenciaNivel))}.</p></div>`);
-  if (school.improvementDetails.reforzamiento) rows.push('<div class="observation-card reinforced"><strong>Reforzamiento estructural registrado</strong></div>');
-  return rows.join('') || '<p class="muted-box">Sin observaciones territoriales bajo los criterios del visor.</p>';
-}
-
-function activateTabs() {
-  const root = q('detailContent');
-  root.querySelectorAll('.tab-btn').forEach(button => button.onclick = () => {
-    root.querySelectorAll('.tab-btn').forEach(item => item.classList.toggle('active', item === button));
-    root.querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('active', pane.dataset.pane === button.dataset.tab));
-  });
-}
-
-function updateStats() {
-  const projects = checkedValues('#programFilters input');
-  const improvements = checkedValues('#improvementFilters input');
-  const needs = checkedValues('#maintenanceFilters input');
-  const high = filteredSchools.filter(s => s.indice >= 15).length;
-  const alcs = new Set(filteredSchools.map(s => s.alcaldia).filter(Boolean)).size;
-  q('summaryTitle').textContent = (projects.length + improvements.length + needs.length) ? 'Resultado del cruce' : 'Resumen visible';
-  const values = [[filteredSchools.length,'Escuelas'],[alcs,'Alcaldías'],[high,'Con 15 o más atenciones'],[projects.length + improvements.length + needs.length,'Opciones activas']];
-  values.forEach(([value,label], index) => { q(`kpi${index+1}`).textContent = Number(value).toLocaleString('es-MX'); q(`kpiLabel${index+1}`).textContent = label; });
-}
-
-function renderLegend() {
-  const projects = checkedValues('#programFilters input');
-  const improvements = checkedValues('#improvementFilters input');
-  const needs = checkedValues('#maintenanceFilters input');
-  const risk = document.querySelector('input[name="riskMode"]:checked')?.value || '';
-  let title = 'Atención de Revisión Diagnóstico';
-  let rows = Object.entries(CLASS_COLORS).map(([label,color]) => [color,label]);
-  if ([projects.length > 0, improvements.length > 0, needs.length > 0, Boolean(risk)].filter(Boolean).length > 1) {
-    title = 'Cruce de selecciones'; rows = [['#111827','Cumple todos los apartados activos']];
-  } else if (projects.length) {
-    title = 'Proyectos seleccionados';
-    rows = projects.slice(0,8).map(id => { const i = programCatalog.findIndex(item => item.id === id); return [PROGRAM_COLORS[i % PROGRAM_COLORS.length], programCatalog[i]?.label || id]; });
-  } else if (improvements.length) {
-    title = 'Mejoras seleccionadas'; rows = improvements.map(key => [IMPROVEMENTS[key].color, IMPROVEMENTS[key].label]);
-  } else if (risk) {
-    title = 'Observación territorial'; rows = [[OBS_COLORS[risk], 'Escuela con observación']];
-  }
-  q('legendTitle').textContent = title;
-  q('legendBody').innerHTML = rows.map(([color,label]) => `<div><span class="swatch" style="background:${color}"></span>${escapeHtml(label)}</div>`).join('');
-}
-
-function drawBoundaries() {
-  alcaldiaBoundaryLayer = L.geoJSON(alcaldiasGeoJSON, {style:{color:'#1f4e79',weight:1,fillOpacity:0,opacity:.6}}).addTo(map);
-  map.fitBounds(alcaldiaBoundaryLayer.getBounds(), {padding:[10,10]});
-}
-
-function drawExtraLayers() {
-  subsidenciaLayer = L.geoJSON(subsidenciasGeoJSON, {style:feature => ({color:'#fff',weight:.3,fillColor:CLASS_COLORS[subClass(Number(feature.properties?.gridcode))] || '#64748b',fillOpacity:.48})});
-  fracturamientoLayer = L.geoJSON(fracturamientoGeoJSON, {style:{color:'#7c2d12',weight:2.2,opacity:.82}, onEachFeature:(feature,layer) => layer.bindTooltip(clean(feature.properties?.TIPO) || 'Fracturamiento', {sticky:true})});
-}
-
-function toggleLayer(layer, on) { if (!layer) return; if (on) layer.addTo(map); else map.removeLayer(layer); }
-
-function populateFilters() {
-  allSchools.forEach(school => { school.alcaldia = normalizeAlcaldia(school.alcaldia); });
-  fillSelect('filtroAlcaldia', unique(allSchools.map(s => s.alcaldia)));
-  fillSelect('filtroNivel', unique(allSchools.map(s => s.nivel)));
-  q('listaCCT').innerHTML = unique(allSchools.flatMap(s => s.ccts)).map(value => `<option value="${escapeAttr(value)}"></option>`).join('');
-  q('listaNombres').innerHTML = unique(allSchools.map(s => s.nombre)).map(value => `<option value="${escapeAttr(value)}"></option>`).join('');
-}
-
-function fillSelect(id, values) {
-  const select = q(id), first = select.querySelector('option').outerHTML;
-  select.innerHTML = first + values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
-}
-
-function filterProgramMenu() {
-  const term = normalize(q('programSearch').value);
-  document.querySelectorAll('.program-option').forEach(label => label.classList.toggle('hidden-by-search', term && !label.dataset.search.includes(term)));
-  document.querySelectorAll('.program-group').forEach(group => {
-    const visible = [...group.querySelectorAll('.program-option')].some(label => !label.classList.contains('hidden-by-search'));
-    group.classList.toggle('hidden-by-search', !visible);
-    if (term && visible) group.open = true;
-  });
-}
-
-function saveState() {
-  if (!initialized) return;
-  localStorage.setItem('visorStateV3:Visor_Xochimilco', JSON.stringify({
-    alcaldia:q('filtroAlcaldia').value, nivel:q('filtroNivel').value,
-    needs:checkedValues('#maintenanceFilters input'), improvements:checkedValues('#improvementFilters input'), projects:checkedValues('#programFilters input'),
-    risk:document.querySelector('input[name="riskMode"]:checked')?.value || '', schools:schoolsVisible,
-    subsidencias:q('toggleSubsidencias').checked, fracturamiento:q('toggleFracturamiento').checked
-  }));
+function getState() {
+  return {
+    mode: activeMode(),
+    alcaldia: q('filtroAlcaldia').value,
+    nivel: q('filtroNivel').value,
+    prioridades: selectedPriorities(),
+    cct: q('buscarCCT').value,
+    nombre: q('buscarNombre').value,
+    rankMin: q('rankMin').value,
+    rankMax: q('rankMax').value,
+    programas: selectedPrograms(),
+    mantenimiento: selectedMaintenance(),
+    risk: selectedRisk()
+  };
 }
 
 function restoreState() {
-  let state = {};
-  try { state = JSON.parse(localStorage.getItem('visorStateV3:Visor_Xochimilco') || '{}'); } catch {}
-  q('filtroAlcaldia').value = state.alcaldia || '';
-  q('filtroNivel').value = state.nivel || '';
-  restoreChecks('#maintenanceFilters input', state.needs || []);
-  restoreChecks('#improvementFilters input', state.improvements || []);
-  restoreChecks('#programFilters input', state.projects || []);
-  if (state.risk) { const input = document.querySelector(`input[name="riskMode"][value="${CSS.escape(state.risk)}"]`); if (input) input.checked = true; }
-  schoolsVisible = state.schools !== false;
-  q('toggleSchools').checked = schoolsVisible;
-  q('toggleSubsidencias').checked = Boolean(state.subsidencias);
-  q('toggleFracturamiento').checked = Boolean(state.fracturamiento);
-  toggleLayer(subsidenciaLayer, q('toggleSubsidencias').checked);
-  toggleLayer(fracturamientoLayer, q('toggleFracturamiento').checked);
-  q('subsidenciaLegend').classList.toggle('hidden', !q('toggleSubsidencias').checked);
+  try {
+    const state = JSON.parse(localStorage.getItem('rm08_visor_state_xochimilco') || 'null');
+    if (!state) return;
+    const mode = document.querySelector(`input[name="viewMode"][value="${state.mode}"]`);
+    if (mode) mode.checked = true;
+    ['alcaldia','nivel'].forEach(field => {
+      const target = q(`filtro${field.charAt(0).toUpperCase() + field.slice(1)}`);
+      if (target && [...target.options].some(option => option.value === state[field])) target.value = state[field] || '';
+    });
+    const restoredPriorities = state.prioridades || (state.prioridad ? [state.prioridad] : []);
+    document.querySelectorAll('#priorityFilters input').forEach(input => input.checked = restoredPriorities.includes(input.value));
+    q('buscarCCT').value = state.cct || '';
+    q('buscarNombre').value = state.nombre || '';
+    q('rankMin').value = state.rankMin || '';
+    q('rankMax').value = state.rankMax || '';
+    document.querySelectorAll('#programFilters input').forEach(input => input.checked = (state.programas || []).includes(input.value));
+    document.querySelectorAll('#maintenanceFilters input').forEach(input => input.checked = (state.mantenimiento || []).includes(input.value));
+    const risk = document.querySelector(`input[name="riskMode"][value="${state.risk}"]`);
+    if (risk) risk.checked = true;
+  } catch (error) {
+    console.warn('No se pudo restaurar el estado previo.', error);
+  }
 }
 
-function restoreChecks(selector, values) { document.querySelectorAll(selector).forEach(input => { input.checked = values.includes(input.value); }); }
-function checkedValues(selector) { return [...document.querySelectorAll(`${selector}:checked`)].map(input => input.value); }
-function hasFracture(s) { return s.distFractura !== null && s.distFractura <= 250; }
-function hasSubsidence(s) { return s.subsidenciaNivel >= 4 || ['alta','muy alta'].includes(normalize(s.subsidenciaClase)); }
-function classifyIndex(value) { return value >= 20 ? 'Muy alta' : value >= 15 ? 'Alta' : value >= 10 ? 'Media' : value >= 5 ? 'Baja' : 'Muy baja'; }
-function subClass(code) { return ({1:'Muy baja',2:'Baja',3:'Media',4:'Alta',5:'Muy alta'})[code] || 'No clasificada'; }
-function normalizeCCT(value) { return clean(value).replace(/\s+/g,'').toUpperCase(); }
-function clean(value) { return value === null || value === undefined ? '' : String(value).trim().replace(/\s+/g,' '); }
-function normalize(value) { return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
-function normalizeAlcaldia(value) { return clean(value).normalize('NFC').toLocaleUpperCase('es-MX'); }
-function unique(values) { return [...new Set(values.filter(Boolean))].sort((a,b) => a.localeCompare(b,'es')); }
-function humanize(value) { return value.replaceAll('_',' ').replace(/^./, char => char.toUpperCase()); }
-function detailRow(label, value) { const text = clean(value); return text ? `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(text)}</dd>` : ''; }
-function escapeHtml(value) { return clean(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char])); }
-function escapeAttr(value) { return escapeHtml(value); }
-function q(id) { return document.getElementById(id); }
-function debounce(fn, delay) { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); }; }
-
-function toggleMenu(bodyId, arrowId, buttonId) {
-  const body = q(bodyId), open = body.classList.contains('hidden');
-  body.classList.toggle('hidden', !open); q(arrowId).textContent = open ? '⌄' : '›'; q(buttonId).setAttribute('aria-expanded', String(open));
+function render(fitResult) {
+  if (!dataset) return;
+  const state = getState();
+  try { localStorage.setItem('rm08_visor_state_xochimilco', JSON.stringify(state)); } catch (_) {}
+  currentCcts = InmueblesMaster.filterCcts(dataset, state);
+  currentItems = InmueblesMaster.groupsForCcts(dataset, currentCcts);
+  drawMarkers();
+  updateSummary(state);
+  if (fitResult && !hasFitResult) fitCurrentResult();
 }
-function toggleBox(bodyId, buttonId) { const body=q(bodyId), hidden=body.classList.toggle('hidden'); q(buttonId).textContent=hidden?'+':'−'; }
-function collapseSidebar() { q('layout').classList.add('sidebar-collapsed'); q('sidebar').classList.add('hidden-panel'); q('showSidebar').classList.remove('hidden'); setTimeout(() => map.invalidateSize(), 200); }
-function expandSidebar() { q('layout').classList.remove('sidebar-collapsed'); q('sidebar').classList.remove('hidden-panel'); q('showSidebar').classList.add('hidden'); setTimeout(() => map.invalidateSize(), 200); }
-function setStatus(message, error=false) { q('mapStatus').textContent=message; q('mapStatus').classList.toggle('error',error); q('mapStatus').classList.toggle('hidden',!message); }
-function fitSchools(schools, maxZoom=14) { if (!schools.length) return; map.fitBounds(L.latLngBounds(schools.map(s => [s.lat,s.lon])), {padding:[40,40], maxZoom}); }
-function zoomToAlcaldia() { const name=q('filtroAlcaldia').value; if (!name) return; const matches=allSchools.filter(s => s.alcaldia===name); fitSchools(matches,12); }
-function zoomToMatch(type) { const value=type==='cct'?normalizeCCT(q('buscarCCT').value):normalize(q('buscarNombre').value); if (!value) return; const school=allSchools.find(s => type==='cct'?s.ccts.some(c => c.includes(value)):normalize(s.nombre).includes(value)); if (school) map.setView([school.lat,school.lon],16); }
+
+function drawMarkers() {
+  markersLayer.clearLayers();
+  if (!q('toggleSchools').checked) return;
+  const canvas = L.canvas({padding:.35});
+  const coincident = new Map();
+  currentItems.filter(isMapped).forEach(item => {
+    const key = `${item.lat.toFixed(7)}|${item.lon.toFixed(7)}`;
+    if (!coincident.has(key)) coincident.set(key, []);
+    coincident.get(key).push(item);
+  });
+  currentItems.filter(isMapped).forEach(item => {
+    const group = coincident.get(`${item.lat.toFixed(7)}|${item.lon.toFixed(7)}`);
+    const angle = 2 * Math.PI * group.indexOf(item) / group.length;
+    const radius = group.length > 1 ? 0.000075 : 0;
+    const marker = L.circleMarker([item.lat + Math.sin(angle) * radius, item.lon + Math.cos(angle) * radius], {
+      renderer:canvas,
+      radius:6,
+      color:'#fff',
+      weight:1.3,
+      fillColor:priorityColor(item.clase_prioridad_final),
+      fillOpacity:.9
+    });
+    marker.bindTooltip(`<div class="popup-title">${escapeHtml(item.nombre)}</div><div class="popup-meta">${escapeHtml(item.ccts.join(', ') || 'Sin CCT')} · ${escapeHtml(item.clase_prioridad_final)}${item.indice_prioridad_final === null ? '' : ` · IPA ${item.indice_prioridad_final.toFixed(1)}`}</div>`, {sticky:true});
+    marker.on('click', () => showDetail(item, item.ccts_filtrados?.length === 1 ? {cct:item.ccts_filtrados[0]} : {}));
+    marker.addTo(markersLayer);
+  });
+}
+
+function priorityColor(priority) {
+  return ({'Muy alta':'#991b1b', 'Alta':'#dc2626', 'Media':'#f59e0b', 'Baja':'#65a30d', 'Muy baja':'#16a34a'})[priority] || '#64748b';
+}
+
+function countOriginalInmueblesForCcts(ccts) {
+  return InmueblesMaster.count(dataset, ccts);
+}
+
+function updateSummary(state) {
+  const visibleCcts = currentCcts;
+  const metricByTurn = predicate => visibleCcts
+    .filter(predicate)
+    .reduce((total, record) => total + cctTurnCount(record.cct), 0);
+  q('kpiPlanteles').textContent = formatNumber(countOriginalInmueblesForCcts(visibleCcts.map(record => record.cct)));
+  q('kpiCct').textContent = formatNumber(new Set(visibleCcts.map(record => record.cct)).size);
+  q('kpi2').textContent = formatNumber(metricByTurn(item => ['Alta','Muy alta'].includes(item.clase_prioridad_final)));
+  q('kpi3').textContent = formatNumber(metricByTurn(item => item.programas.length));
+  q('kpi4').textContent = formatNumber(metricByTurn(item => item.observacion_territorial !== 'Sin observación' && item.observacion_territorial !== 'Sin información'));
+  q('kpi5').textContent = formatNumber(metricByTurn(item => item.tuvo_apoyo_previo));
+  q('kpi6').textContent = formatNumber(metricByTurn(item => item.mantenimiento_pendientes.length));
+  const parts = [];
+  if (state.prioridades.length) parts.push(`IPA: ${state.prioridades.map(value => value.toLowerCase()).join(', ')}`);
+  if (state.programas.length) parts.push(`${state.programas.length} mejora(s)`);
+  if (state.mantenimiento.length) parts.push(`${state.mantenimiento.length} necesidad(es) de mantenimiento`);
+  if (state.risk) parts.push('observación territorial');
+  if (state.rankMin || state.rankMax) parts.push(`clasificación 1,2,3: ${state.rankMin || 1}–${state.rankMax || 464}`);
+  q('activeCrossSummary').textContent = parts.length ? `Cruce activo: ${parts.join(' + ')}.` : 'Sin cruces temáticos activos.';
+}
+
+function cctTurnCount(cct) {
+  const turns = turnCatalogMap.get(cct);
+  return Array.isArray(turns) && turns.length ? turns.length : 1;
+}
+
+function cctMatchesState(item, state) {
+  return InmueblesMaster.matchesCct(item, state);
+}
+
+function fitCurrentResult() {
+  const points = currentItems.filter(isMapped).map(item => [item.lat, item.lon]);
+  if (points.length) {
+    map.fitBounds(L.latLngBounds(points), {padding:[28,28], maxZoom:15});
+    hasFitResult = true;
+  }
+}
+
+function bindSearchFocus(input, type) {
+  const focus = () => focusSearchResult(type, input.value);
+  input.addEventListener('change', focus);
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    focus();
+  });
+}
+
+function focusSearchResult(type, rawValue) {
+  const value = clean(rawValue);
+  if (!value) return;
+  const items = activeItems();
+  const values = item => type === 'cct' ? item.ccts : item.nombres;
+  const item = items.find(candidate => values(candidate).some(entry => clean(entry) === value))
+    || items.find(candidate => values(candidate).some(entry => clean(entry).includes(value)));
+  if (!item) return;
+  if (isMapped(item)) map.setView([item.lat, item.lon], 17, {animate:true});
+  showDetail(item);
+}
+
+function clearFilters() {
+  ['filtroAlcaldia','filtroNivel','buscarCCT','buscarNombre','rankMin','rankMax'].forEach(id => q(id).value = '');
+  document.querySelectorAll('#priorityFilters input, #programFilters input, #maintenanceFilters input, input[name="riskMode"]').forEach(input => input.checked = false);
+  hasFitResult = false;
+  render(true);
+}
+
+function showDetail(item, selection = {}) {
+  const hostItem = item.tipo === 'inmueble'
+    ? item
+    : dataset.inmuebles.find(candidate => candidate.ccts.includes(item.cct)) || item;
+  const selectedCct = selection.cct || (hostItem.tipo === 'cct' || hostItem.ccts.length === 1 ? hostItem.cct || hostItem.ccts[0] : '');
+  const selectedCctItem = selectedCct ? cctRecordMap.get(selectedCct) : null;
+  const detailItem = selectedCctItem || hostItem;
+  const turns = selectedCct ? (turnCatalogMap.get(selectedCct) || []) : [];
+  const selectedTurn = turns.find(turn => `${turn.id}|${turn.turno}` === selection.turno) || null;
+  const effectiveTurn = selectedTurn || (turns.length === 1 ? turns[0] : null);
+  const selectedTurnLabel = effectiveTurn?.turno || (turns.length > 1 ? 'Seleccione un turno' : selectedCct ? 'Sin dato' : 'Seleccione un CCT');
+  const cctSelector = hostItem.tipo === 'inmueble' && hostItem.ccts.length > 1
+    ? `<section class="entity-selector"><span>Seleccione un CCT</span><div>${hostItem.ccts.map(key => `<button type="button" class="selector-button${selectedCct === key ? ' active' : ''}" data-cct="${escapeHtml(key)}">${escapeHtml(key)}</button>`).join('')}</div></section>`
+    : '';
+  const turnSelector = selectedCct && turns.length > 1
+    ? `<section class="entity-selector"><span>Seleccione un turno</span><div>${turns.map(turn => {
+        const key = `${turn.id}|${turn.turno}`;
+        return `<button type="button" class="selector-button${selection.turno === key ? ' active' : ''}" data-turn="${escapeHtml(key)}">${escapeHtml(turn.turno)}</button>`;
+      }).join('')}</div></section>`
+    : '';
+  q('detailTitle').textContent = effectiveTurn?.nombre || detailItem.nombre;
+  const prioritySlug = clean(detailItem.clase_prioridad_final).toLowerCase().replace(/\s+/g, '-');
+  const programCards = detailItem.programa_registros.length
+    ? renderProgramSummary(detailItem.programa_registros)
+    : '<p class="muted-box">No hay registros de mejoras vinculados a esta unidad.</p>';
+  const supportDetails = renderSupportDetails(detailItem);
+  const locationWarnings = selectedCct
+    ? [selectedCctItem?.alerta_ubicacion].filter(Boolean)
+    : Object.values(hostItem.ubicaciones_por_verificar || {});
+  const obraRows = getDetalleObraRows(selectedCct ? [selectedCct] : hostItem.ccts);
+  const maintenanceCards = detailItem.mantenimiento_disponible
+    ? (detailItem.mantenimiento_pendientes.length
+      ? detailItem.mantenimiento_pendientes.map(renderMaintenanceNeed).join('')
+      : '<p class="status-box status-ok">El diagnóstico no reporta necesidades pendientes en las variables evaluadas.</p>')
+    : '<p class="status-box status-missing">Este inmueble no cuenta con diagnóstico de mantenimiento en la nueva base. No se interpreta como ausencia de necesidades.</p>';
+  q('detailContent').innerHTML = `
+    <div class="detail-tabs">
+      <button class="tab-btn active" data-tab="general">General</button>
+      <button class="tab-btn" data-tab="prioridad">Prioridad</button>
+      <button class="tab-btn" data-tab="mantenimiento">Mantenimiento <span class="tab-count">${detailItem.mantenimiento_pendientes.length}</span></button>
+      <button class="tab-btn" data-tab="programas">Mejoras <span class="tab-count">${detailItem.programa_registros.length}</span></button>
+      ${obraRows.length ? '<button class="tab-btn" data-tab="detalle-obra">Detalle de obra</button>' : ''}
+      <button class="tab-btn" data-tab="territorio">Territorio</button>
+    </div>
+    <div class="tab-pane active" data-pane="general">
+      ${cctSelector}${turnSelector}
+      ${locationWarnings.map(message => `<p class="context-note">${escapeHtml(message)}</p>`).join('')}
+      <dl class="general-info-grid"><dt>Unidad</dt><dd>${selectedCct ? 'CCT' : 'Plantel'}</dd><dt>Código DGA</dt><dd>${escapeHtml(detailItem.codigos_dga.join(', ') || 'Sin dato')}</dd><dt>CCT</dt><dd>${escapeHtml(selectedCct || detailItem.ccts.join(', ') || 'Sin CCT')}</dd><dt>Turno</dt><dd>${escapeHtml(selectedTurnLabel)}</dd><dt>Alcaldía</dt><dd>${escapeHtml(effectiveTurn?.alcaldia || detailItem.alcaldia || 'Sin dato')}</dd><dt>Colonia</dt><dd>${escapeHtml(effectiveTurn?.colonia || detailItem.colonia || 'Sin dato')}</dd><dt>Domicilio</dt><dd>${escapeHtml(effectiveTurn?.domicilio || detailItem.domicilio || 'Sin dato')}</dd><dt>Nivel educativo</dt><dd>${escapeHtml(effectiveTurn?.nivel || detailItem.niveles.join(', ') || 'Sin dato')}</dd><dt>Coordenadas</dt><dd>${isMapped(detailItem) ? `${detailItem.lat.toFixed(6)}, ${detailItem.lon.toFixed(6)}` : 'Sin coordenadas'}</dd></dl>
+      <div class="support-summary ${detailItem.tuvo_apoyo_previo ? 'has-support' : ''}"><span>Apoyo previo identificado</span><strong>${detailItem.tuvo_apoyo_previo ? 'Sí' : 'No'}</strong></div>
+      ${detailItem.tuvo_apoyo_previo ? `<h3 class="section-subtitle">Apoyos y trabajos recibidos</h3>${supportDetails}` : ''}
+    </div>
+    <div class="tab-pane" data-pane="prioridad">
+      <div class="priority-card priority-${prioritySlug}"><span>Índice de Prioridad de Atención</span><strong>${escapeHtml(detailItem.clase_prioridad_final)}</strong><em>${detailItem.indice_prioridad_final === null ? 'Sin índice completo' : `${detailItem.indice_prioridad_final.toFixed(1)} / 100`}</em></div>
+      <dl><dt>Condición de mantenimiento</dt><dd>${detailItem.indice_mantenimiento === null ? 'Sin información' : `${detailItem.indice_mantenimiento.toFixed(1)} / 100 · ${escapeHtml(detailItem.clase_mantenimiento)}`}</dd><dt>Peligro territorial</dt><dd>${detailItem.indice_peligro_territorial === null ? 'Sin información' : `${detailItem.indice_peligro_territorial.toFixed(1)} / 100 · ${escapeHtml(detailItem.clase_peligro_territorial)}`}</dd><dt>Calidad del índice</dt><dd>${escapeHtml(detailItem.calidad_indice_final)}</dd><dt>Alerta</dt><dd>${escapeHtml(detailItem.alerta_prioridad)}</dd><dt>Prioridad RM08 original</dt><dd>${escapeHtml(detailItem.prioridad_rm08_original || 'Sin clasificación')} · índice ${detailItem.indice_rm08_original ?? '—'}</dd><dt>1, 2, 3 2026</dt><dd>${detailItem.prioridades_123_2026.length ? `Clasificación ${escapeHtml(detailItem.prioridades_123_2026.join(', '))} de 464` : 'Sin clasificación'}</dd></dl>
+      <p class="method-note">Índice final = 60% condición de mantenimiento + 40% peligro territorial. El peligro territorial combina 70% subsidencia/hundimiento y 30% cercanía a fracturas. Los faltantes no se convierten en cero.</p>
+    </div>
+    <div class="tab-pane" data-pane="mantenimiento">
+      <div class="maintenance-score"><span>Condición de mantenimiento</span><strong>${detailItem.indice_mantenimiento === null ? 'Sin diagnóstico' : `${detailItem.indice_mantenimiento.toFixed(1)} / 100`}</strong><small>${escapeHtml(detailItem.clase_mantenimiento)} · ${escapeHtml(detailItem.alerta_mantenimiento)}</small></div>
+      ${detailItem.mantenimiento_transformador ? '<p class="context-note">El inmueble reporta subestación o transformador. Este dato no suma puntos, pero especializa la revisión eléctrica.</p>' : ''}
+      <div class="maintenance-detail-list">${maintenanceCards}</div>
+    </div>
+    <div class="tab-pane" data-pane="programas">
+      <div class="support-summary ${detailItem.tuvo_apoyo_previo ? 'has-support' : ''}"><span>Apoyo previo identificado</span><strong>${detailItem.tuvo_apoyo_previo ? 'Sí' : 'No'}</strong></div>
+      <h3 class="section-subtitle">Apoyos y trabajos recibidos</h3>${supportDetails}
+      <h3 class="section-subtitle">Registros de mejoras</h3>${programCards}
+    </div>
+    ${obraRows.length ? `<div class="tab-pane" data-pane="detalle-obra">${renderDetalleObra(obraRows)}</div>` : ''}
+    <div class="tab-pane" data-pane="territorio">
+      <dl class="territory-info-grid"><dt>Índice territorial</dt><dd>${detailItem.indice_peligro_territorial === null ? 'Sin información' : `${detailItem.indice_peligro_territorial.toFixed(1)} / 100 · ${escapeHtml(detailItem.clase_peligro_territorial)}`}</dd><dt>Calidad territorial</dt><dd>${escapeHtml(detailItem.calidad_peligro_territorial)}</dd><dt>Resultado de observación</dt><dd>${escapeHtml(detailItem.observacion_territorial)}</dd><dt>Fracturamiento</dt><dd>${detailItem.cercano_fracturamiento_250m ? 'Sí, dentro de 250 m' : detailItem.distancia_fracturamiento_m === null ? 'Sin información' : 'No, fuera de 250 m'}</dd><dt>Distancia mínima</dt><dd>${detailItem.distancia_fracturamiento_m === null ? 'Sin información' : `${formatNumber(detailItem.distancia_fracturamiento_m)} m · nivel ${detailItem.nivel_fracturamiento}`}</dd><dt>Subsidencia/hundimiento</dt><dd>${escapeHtml(detailItem.clase_subsidencia)}${detailItem.nivel_subsidencia ? ` · nivel ${detailItem.nivel_subsidencia}` : ''}</dd></dl>
+      <p class="method-note">La proximidad a fracturas y la clasificación de subsidencia son referencias territoriales para ordenar revisiones; no constituyen un dictamen estructural.</p>
+    </div>`;
+  q('detailPanel').classList.add('open');
+  q('detailContent').querySelectorAll('.tab-btn').forEach(button => button.addEventListener('click', () => activateTab(button.dataset.tab)));
+  q('detailContent').querySelectorAll('[data-cct]').forEach(button => button.addEventListener('click', () => showDetail(hostItem, {cct:button.dataset.cct})));
+  q('detailContent').querySelectorAll('[data-turn]').forEach(button => button.addEventListener('click', () => showDetail(hostItem, {cct:selectedCct, turno:button.dataset.turn})));
+}
+
+function getDetalleObraRows(ccts) {
+  const rows = (ccts || []).flatMap(cct => detalleObraPorCct[cct] || []);
+  return [...new Map(rows.map(row => [JSON.stringify([row.contrato, row.descripcion]), row])).values()];
+}
+
+function renderDetalleObra(rows) {
+  return `<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.5"><thead><tr><th style="width:34%;padding:9px;text-align:left;vertical-align:top;border-bottom:1px solid #cbd5e1;overflow-wrap:anywhere">No. de contrato</th><th style="padding:9px;text-align:left;vertical-align:top;border-bottom:1px solid #cbd5e1;overflow-wrap:anywhere">Descripción de los trabajos en acta entrega-recepción</th></tr></thead><tbody>${rows.map(row => `<tr><td style="padding:9px;vertical-align:top;border-bottom:1px solid #e2e8f0;overflow-wrap:anywhere;white-space:pre-wrap">${escapeHtml(row.contrato)}</td><td style="padding:9px;vertical-align:top;border-bottom:1px solid #e2e8f0;overflow-wrap:anywhere;white-space:pre-wrap">${escapeHtml(row.descripcion)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function activateTab(tab) {
+  q('detailContent').querySelectorAll('.tab-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+  q('detailContent').querySelectorAll('.tab-pane').forEach(pane => pane.classList.toggle('active', pane.dataset.pane === tab));
+}
+
+function renderProgramSummary(refs) {
+  const entries = refs.map(ref => {
+    const meta = programMap.get(ref.programa);
+    const label = meta?.label || ref.programa;
+    const positionField = ref.programa === 'faltantes_464'
+      ? (ref.registro?.campos || []).find(field => clean(field.campo) === clean('1, 2, 3 2026 PRIORIDAD 464'))
+      : null;
+    const position = positionField && positionField.valor !== '' && positionField.valor !== null
+      ? Number(positionField.valor)
+      : Number.NaN;
+    return {
+      key: `${ref.programa}|${Number.isFinite(position) ? position : ''}`,
+      label: Number.isFinite(position) ? `${label} · ${formatNumber(position)} de 464` : label,
+      color: meta?.color || '#174a72'
+    };
+  });
+  const uniqueEntries = [...new Map(entries.map(entry => [entry.key, entry])).values()];
+  return `<ul class="improvement-list">${uniqueEntries.map(entry => `<li><i class="program-dot" style="--program-color:${escapeHtml(entry.color)}"></i><strong>${escapeHtml(entry.label)}</strong></li>`).join('')}</ul>`;
+}
+
+function renderMaintenanceNeed(variableId) {
+  const variable = maintenanceMap.get(variableId);
+  if (!variable) return '';
+  return `<article class="maintenance-need"><div><span>${escapeHtml(variable.grupo)}</span><strong>${escapeHtml(variable.nombre_completo)}</strong></div><b>${variable.peso} pts</b><p>${escapeHtml(variable.descripcion)}</p></article>`;
+}
+
+function renderSupportDetails(item) {
+  const supports = Array.isArray(item.apoyos_recibidos_detalle) ? item.apoyos_recibidos_detalle : [];
+  if (!item.tuvo_apoyo_previo) return '<p class="muted-box">No se identificaron apoyos previos vinculados.</p>';
+  if (!supports.length) {
+    return item.mejoras_previas.length
+      ? `<div class="support-detail-list">${item.mejoras_previas.map(programa => `<article class="support-detail"><div class="support-detail-head"><span class="support-check" aria-hidden="true">✓</span><div><small>Programa de apoyo</small><strong>${escapeHtml(programa)}</strong></div></div><p>El padrón confirma el apoyo, pero la base no incluye el desglose de los trabajos.</p></article>`).join('')}</div>`
+      : '<p class="muted-box">El padrón confirma apoyo previo, pero no incluye su desglose.</p>';
+  }
+  return `<div class="support-detail-list">${supports.map(support => {
+    const metadata = [
+      support.ejecutor ? `Ejecutor: ${support.ejecutor}` : '',
+      support.etapa || '',
+      support.estado || '',
+      support.contrato ? `Contrato: ${support.contrato}` : ''
+    ].filter(Boolean);
+    const works = Array.isArray(support.trabajos) ? support.trabajos : [];
+    return `<article class="support-detail">
+      <div class="support-detail-head"><span class="support-check" aria-hidden="true">✓</span><div><small>Programa de apoyo</small><strong>${escapeHtml(support.programa || 'Apoyo registrado')}</strong>${metadata.length ? `<em>${metadata.map(escapeHtml).join(' · ')}</em>` : ''}</div></div>
+      ${works.length ? `<ul class="support-work-list">${works.map(work => `<li><span aria-hidden="true">✓</span><strong>${escapeHtml(work)}</strong></li>`).join('')}</ul>` : '<p>El padrón confirma el apoyo, pero la base no incluye el desglose de los trabajos.</p>'}
+    </article>`;
+  }).join('')}</div>`;
+}
+
+function hideSidebar() {
+  q('layout').classList.add('sidebar-collapsed');
+  q('showSidebar').classList.remove('hidden');
+  setTimeout(() => map.invalidateSize(), 220);
+}
+
+function showSidebar() {
+  q('layout').classList.remove('sidebar-collapsed');
+  q('showSidebar').classList.add('hidden');
+  setTimeout(() => map.invalidateSize(), 220);
+}
+
+async function toggleFullscreen() {
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    else await document.exitFullscreen();
+  } catch (error) {
+    console.warn('Pantalla completa no disponible.', error);
+  }
+}
+
+function syncFullscreen() {
+  const active = Boolean(document.fullscreenElement);
+  q('fullscreenButton').textContent = active ? 'Salir de pantalla completa' : 'Pantalla completa';
+  q('fullscreenButton').setAttribute('aria-pressed', String(active));
+  document.body.classList.toggle('is-fullscreen', active);
+  setTimeout(() => map.invalidateSize(), 100);
+}

@@ -3,39 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Estadísticas | Alcaldía Xochimilco</title>
-  <link rel="stylesheet" href="style.css?v=20260818-1">
+  <title>Estadísticas | Índice de Prioridad de Atención</title>
+  <link rel="stylesheet" href="style.css?v=20260901-ipa">
 </head>
 <body class="stats-page">
   <main class="stats-container">
     <header class="stats-header">
-      <div><h1>Estadísticas del visor — Alcaldía Xochimilco</h1><p>El resultado conserva el cruce de Programas, Mejoras y Mantenimiento seleccionado en el mapa.</p></div>
+      <div><span class="eyebrow">Cruce completo de variables</span><h1>Estadísticas de Infraestructura · Xochimilco</h1><p>Combina unidad, ubicación, prioridad final, mantenimiento, clasificación 1, 2, 3 2026, mejoras y observaciones territoriales.</p></div>
       <a href="index.html">Volver al visor</a>
     </header>
+
     <section class="stats-filter-panel">
       <h2>Filtros generales</h2>
       <div class="stats-filter-grid">
+        <div><label for="stViewMode">Visualizar información</label><select id="stViewMode"><option value="cct" selected>Por CCT</option></select></div>
         <div><label for="stAlcaldia">Alcaldía</label><select id="stAlcaldia"><option value="">Todas</option></select></div>
         <div><label for="stNivel">Nivel educativo</label><select id="stNivel"><option value="">Todos</option></select></div>
         <div><label for="stCCT">CCT</label><input id="stCCT" type="search" placeholder="Buscar CCT"></div>
-        <div><label for="stNombre">Escuela</label><input id="stNombre" type="search" placeholder="Buscar nombre"></div>
-        <div class="stats-actions"><button id="stLimpiar" class="secondary">Limpiar filtros generales</button></div>
+        <div><label for="stNombre">Plantel</label><input id="stNombre" type="search" placeholder="Buscar nombre"></div>
+        <div><label for="stRankMin">Clasificación 1,2,3 desde</label><input id="stRankMin" type="number" min="1" max="464" placeholder="1"></div>
+        <div><label for="stRankMax">Clasificación 1,2,3 hasta</label><input id="stRankMax" type="number" min="1" max="464" placeholder="464"></div>
+      </div>
+      <fieldset class="priority-fieldset stats-priority-fieldset">
+        <legend>Niveles del Índice de Prioridad de Atención</legend>
+        <div class="stats-panel-head"><p class="stats-help">Puedes seleccionar uno o varios niveles; se cruzan con el resto de los filtros.</p><div class="stats-mini-actions"><button id="stAllPriorities" type="button">Seleccionar todos</button><button id="stClearPriorities" type="button" class="secondary">Quitar todos</button></div></div>
+        <div id="stPriorityFilters" class="priority-filter-grid stats-priority-grid">
+          <label><input type="checkbox" value="Muy alta"><span><i class="priority-dot dot-muy-alta"></i>Muy alta</span></label>
+          <label><input type="checkbox" value="Alta"><span><i class="priority-dot dot-alta"></i>Alta</span></label>
+          <label><input type="checkbox" value="Media"><span><i class="priority-dot dot-media"></i>Media</span></label>
+          <label><input type="checkbox" value="Baja"><span><i class="priority-dot dot-baja"></i>Baja</span></label>
+          <label><input type="checkbox" value="Muy baja"><span><i class="priority-dot dot-muy-baja"></i>Muy baja</span></label>
+        </div>
+      </fieldset>
+      <p class="stats-help">Los valores de 1, 2, 3 2026 son posiciones dentro de la prioridad 464; no se suman como cantidades.</p>
+    </section>
+
+    <section class="stats-theme-grid">
+      <div class="stats-filter-panel">
+        <div class="stats-panel-head"><h2>Mejoras</h2><div class="stats-mini-actions"><button id="stAllPrograms" type="button">Seleccionar todas</button><button id="stClearPrograms" type="button" class="secondary">Quitar todas</button></div></div>
+        <p class="stats-help">Si eliges varias mejoras se incluyen unidades que pertenezcan a cualquiera de ellas; después se cruzan con todos los demás filtros.</p>
+        <div id="stPrograms" class="stats-check-grid"></div>
+      </div>
+      <div class="stats-filter-panel">
+        <div class="stats-panel-head"><h2>Mantenimiento pendiente</h2><div class="stats-mini-actions"><button id="stAllMaintenance" type="button">Seleccionar todas</button><button id="stClearMaintenance" type="button" class="secondary">Quitar todas</button></div></div>
+        <p class="stats-help">Al seleccionar varias necesidades se incluyen unidades que tengan pendiente al menos una; después se cruzan con los demás filtros.</p>
+        <div id="stMaintenance" class="stats-check-grid"></div>
+      </div>
+      <div class="stats-filter-panel">
+        <div class="stats-panel-head"><h2>Observaciones territoriales</h2><button id="stClearRisk" type="button" class="secondary">Quitar selección</button></div>
+        <div class="stats-risk-list">
+          <label><input type="radio" name="stRisk" value="obs_fractura"><span>Cercanía a fracturamiento</span></label>
+          <label><input type="radio" name="stRisk" value="obs_subsidencia"><span>Subsidencia alta o muy alta</span></label>
+          <label><input type="radio" name="stRisk" value="obs_combinada"><span>Observación combinada</span></label>
+        </div>
       </div>
     </section>
-    <section class="stats-filter-panel"><h2>Cruce activo</h2><p id="statsContext" class="stats-context">Cargando selección…</p><div id="statsTags" class="popup-flags"></div></section>
+
+    <section class="stats-filter-panel">
+      <div class="stats-panel-head"><div><h2>Cruce activo</h2><p id="statsContext" class="stats-context">Sin filtros temáticos.</p></div><button id="stLimpiar" type="button" class="secondary">Limpiar todos los filtros</button></div>
+      <div id="statsTags" class="popup-flags"></div>
+    </section>
+
     <section class="cards">
-      <div class="card"><span>Escuelas del resultado</span><strong id="stTotal">0</strong></div>
-      <div class="card"><span>Mayor número de atenciones</span><strong id="stMax">0</strong></div>
-      <div class="card"><span>Alcaldías representadas</span><strong id="stAux1">0</strong></div>
-      <div class="card"><span>Promedio del índice</span><strong id="stAux2">0</strong></div>
+      <div class="card"><span id="stTotalLabel">CCT del resultado</span><strong id="stTotal">0</strong></div>
+      <div class="card"><span>Inmuebles del resultado</span><strong id="stInmuebles">0</strong></div>
+      <div class="card"><span>Con coordenadas</span><strong id="stMapped">0</strong></div>
+      <div class="card"><span>Prioridad alta o muy alta</span><strong id="stHigh">0</strong></div>
+      <div class="card"><span>Con observación territorial</span><strong id="stTerritorial">0</strong></div>
+      <div class="card"><span>Con apoyo previo</span><strong id="stSupport">0</strong></div>
+      <div class="card"><span>Con mantenimiento pendiente</span><strong id="stMaintenancePending">0</strong></div>
+    </section>
+
+    <section class="grid-two">
+      <div class="table-panel"><h2>Distribución por prioridad final</h2><table><thead><tr><th>Prioridad</th><th id="stDistributionUnit">Inmuebles</th><th>Proporción</th></tr></thead><tbody id="tablaDistribucion"></tbody></table></div>
+      <div class="table-panel"><h2>Resultados por nivel educativo</h2><table><thead><tr><th>Nivel</th><th id="stLevelUnit">Inmuebles</th><th>Alta o muy alta</th></tr></thead><tbody id="tablaNivel"></tbody></table></div>
     </section>
     <section class="grid-two">
-      <div class="table-panel"><h2>Distribución de atención</h2><table><thead><tr><th>Clasificación</th><th>Escuelas</th><th>Proporción</th></tr></thead><tbody id="tablaDistribucion"></tbody></table></div>
-      <div class="table-panel"><h2>Resultados por nivel educativo</h2><table><thead><tr><th>Nivel</th><th>Escuelas</th><th>Mayor índice</th></tr></thead><tbody id="tablaNivel"></tbody></table></div>
+      <div class="table-panel"><h2>Participación por mejora</h2><table><thead><tr><th>Mejora</th><th id="stProgramUnit">Inmuebles</th><th>Proporción</th></tr></thead><tbody id="tablaProgramas"></tbody></table></div>
+      <div class="table-panel"><h2>Observaciones territoriales</h2><table><thead><tr><th>Clasificación</th><th id="stRiskUnit">Inmuebles</th><th>Proporción</th></tr></thead><tbody id="tablaRiesgos"></tbody></table></div>
     </section>
-    <section class="table-panel"><h2>Resultados por alcaldía</h2><table><thead><tr><th>Alcaldía</th><th>Escuelas</th><th>Mayor índice</th><th>Con reforzamiento</th><th>Proporción</th></tr></thead><tbody id="tablaAlcaldia"></tbody></table></section>
-    <section class="table-panel"><h2>Escuelas del resultado</h2><table><thead><tr><th>#</th><th>Escuela</th><th>CCT</th><th>Alcaldía</th><th>Nivel</th><th>Índice</th><th>Programas / proyectos</th></tr></thead><tbody id="tablaRanking"></tbody></table></section>
+    <section class="table-panel"><h2>Necesidades de mantenimiento</h2><table><thead><tr><th>Necesidad</th><th id="stMaintenanceUnit">Inmuebles</th><th>Proporción</th></tr></thead><tbody id="tablaMantenimiento"></tbody></table></section>
+    <section class="table-panel"><h2>Resultados por alcaldía</h2><table><thead><tr><th>Alcaldía</th><th id="stAlcaldiaUnit">Inmuebles</th><th>Alta o muy alta</th><th>Con mejora</th><th>Con apoyo previo</th><th>Proporción</th></tr></thead><tbody id="tablaAlcaldia"></tbody></table></section>
+    <section class="table-panel"><h2 id="stRankingTitle">CCT del resultado</h2><table><thead><tr><th>#</th><th>Plantel / inmueble</th><th>CCT</th><th>Alcaldía</th><th>Nivel</th><th>Prioridad final</th><th>Mantenimiento</th><th>Apoyo previo</th><th>Mejoras recibidas</th><th>Clasificación 1,2,3</th><th>Mejoras vinculadas</th><th>Observación</th></tr></thead><tbody id="tablaRanking"></tbody></table><p class="stats-table-note">La tabla muestra hasta 500 resultados; los indicadores y distribuciones consideran el total filtrado.</p></section>
   </main>
-  <script src="estadisticas.js?v=20260818-1"></script>
+  <script src="cct_master.js?v=20261019-conteos"></script>
+<script src="inmuebles_master.js?v=20261019-conteos"></script>
+  <script src="estadisticas.js?v=20261019-conteos"></script>
 </body>
 </html>

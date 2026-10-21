@@ -3,93 +3,104 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Visor integral de infraestructura educativa Alcaldía Xochimilco</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=20260818-1">
+  <title>Infraestructura educativa · Xochimilco</title>
+  <link rel="stylesheet" href="vendor/leaflet.css?v=1.9.4">
+  <link rel="stylesheet" href="style.css?v=20260929-popup-cierre">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand-block"><span class="eyebrow">Sistema de información geográfica</span><h1>Visor integral de infraestructura educativa Alcaldía Xochimilco</h1><p>Consulta y cruza programas, proyectos, mejoras, mantenimiento y observaciones territoriales de los planteles de la Alcaldía Xochimilco.</p></div>
-  <nav><a id="statsLink" href="estadisticas.html">Estadísticas generales</a></nav>
+  <div class="brand-block">
+    <span class="eyebrow">Infraestructura educativa · Xochimilco</span>
+    <h1>Infraestructura educativa · Xochimilco</h1>
+    <p>Consulta la prioridad final, el mantenimiento pendiente, los apoyos previos, las mejoras y las observaciones territoriales de cada plantel.</p>
+  </div>
+  <nav class="top-actions"><a href="proyecciones.html">Proyecciones de matrícula</a>
+    <button id="fullscreenButton" class="header-button" type="button" title="Ver el visor en pantalla completa" aria-pressed="false">Pantalla completa</button>
+    <a id="statsLink" href="estadisticas.html">Estadísticas generales</a>
+  </nav>
 </header>
+
 <main class="layout" id="layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-head"><div><span class="panel-kicker">Herramientas</span><strong>Panel de consulta</strong></div><button id="toggleSidebar" class="icon-button" title="Ocultar menú">‹</button></div>
-
     <section class="panel">
       <h2>Visualización</h2>
-      <label class="inline-check"><input type="checkbox" id="toggleSchools" checked><span>Mostrar escuelas</span></label>
-      <button id="modeMaintenance" class="mode-button active" type="button">Vista general de mantenimiento</button>
+      <p class="hint">Mapa por plantel · resumen por plantel, CCT y CCT/turno.</p>
+      <label class="inline-check"><input type="checkbox" id="toggleSchools" checked><span>Mostrar planteles</span></label>
     </section>
 
     <section class="panel">
       <h2>Filtros generales</h2>
       <label for="filtroAlcaldia">Alcaldía</label><select id="filtroAlcaldia"><option value="">Todas</option></select>
       <label for="filtroNivel">Nivel educativo</label><select id="filtroNivel"><option value="">Todos</option></select>
+      <fieldset class="priority-fieldset">
+        <legend>Niveles del Índice de Prioridad de Atención</legend>
+        <div class="section-actions"><button type="button" id="selectAllPrioridades" class="compact-action">Seleccionar todos</button><button type="button" id="clearPrioridades" class="compact-action secondary-action">Quitar todos</button></div>
+        <div id="priorityFilters" class="priority-filter-grid">
+          <label><input type="checkbox" value="Muy alta"><span><i class="priority-dot dot-muy-alta"></i>Muy alta · &gt;80–100</span></label>
+          <label><input type="checkbox" value="Alta"><span><i class="priority-dot dot-alta"></i>Alta · &gt;60–80</span></label>
+          <label><input type="checkbox" value="Media"><span><i class="priority-dot dot-media"></i>Media · &gt;40–60</span></label>
+          <label><input type="checkbox" value="Baja"><span><i class="priority-dot dot-baja"></i>Baja · &gt;20–40</span></label>
+          <label><input type="checkbox" value="Muy baja"><span><i class="priority-dot dot-muy-baja"></i>Muy baja · 0–20</span></label>
+        </div>
+      </fieldset>
       <label for="buscarCCT">Buscar por CCT</label><input id="buscarCCT" list="listaCCT" type="search" placeholder="Escribe o selecciona CCT"><datalist id="listaCCT"></datalist>
-      <label for="buscarNombre">Buscar por escuela</label><input id="buscarNombre" list="listaNombres" type="search" placeholder="Nombre del inmueble"><datalist id="listaNombres"></datalist>
-      <div class="buttons single-action"><button id="btnLimpiar" class="secondary">Limpiar filtros</button></div>
-    </section>
-
-    <section class="panel">
-      <h2>Mantenimiento / Atención de Revisión</h2><p class="hint">Las variables seleccionadas se cruzan con los proyectos y mejoras activos.</p>
-      <div class="section-actions"><button type="button" id="selectAllMaintenance" class="compact-action">Seleccionar todas</button><button type="button" id="clearMaintenance" class="compact-action secondary-action">Quitar todas</button></div>
-      <div id="maintenanceFilters" class="checklist"></div>
+      <label for="buscarNombre">Buscar por nombre</label><input id="buscarNombre" list="listaNombres" type="search" placeholder="Nombre del plantel"><datalist id="listaNombres"></datalist>
+      <fieldset class="rank-fieldset"><legend>Clasificación 1, 2, 3 2026 · Prioridad 464</legend><div class="rank-range"><div><label for="rankMin">Desde</label><input id="rankMin" type="number" min="1" max="464" placeholder="1"></div><div><label for="rankMax">Hasta</label><input id="rankMax" type="number" min="1" max="464" placeholder="464"></div></div><p>Los números son posiciones de clasificación, no cantidades.</p></fieldset>
+      <div class="buttons single-action"><button id="btnLimpiar" class="secondary" type="button">Limpiar filtros</button></div>
     </section>
 
     <section class="panel collapsible-panel">
-      <button id="toggleMejoras" class="collapse-title" aria-expanded="false"><span>Mejoras</span><span id="mejorasArrow">›</span></button>
-      <div id="mejorasBody" class="collapsible-body hidden">
-        <p class="hint">Puedes elegir una o varias mejoras. Dentro del apartado se muestran escuelas que cumplen cualquiera; al combinarlo con Programas o Mantenimiento se aplica un cruce.</p>
-        <div class="section-actions"><button type="button" id="selectAllMejoras" class="compact-action">Seleccionar todas</button><button type="button" id="clearMejoras" class="compact-action secondary-action">Quitar todas</button></div>
-        <div id="improvementFilters" class="theme-checklist">
-          <label class="inline-check"><input type="checkbox" value="fam_regular"><span>FAM Regular 2025</span></label>
-          <label class="inline-check"><input type="checkbox" value="programa_123_2025"><span>1, 2, 3 por mi Escuela 2025</span></label>
-          <label class="inline-check"><input type="checkbox" value="fam_potenciado"><span>FAM Potenciado 2025</span></label>
-          <label class="inline-check"><input type="checkbox" value="fam_potenciado_basico_2026"><span>FAM Potenciado + FAM Básico 2026</span></label>
-          <label class="inline-check"><input type="checkbox" value="fam_reforzamiento"><span>FAM Reforzamiento estructural</span></label>
-          <label class="inline-check"><input type="checkbox" value="programa_123_2026"><span>1, 2, 3 por mi Escuela 2026</span></label>
-          <label class="inline-check"><input type="checkbox" value="alcaldia_apoyo"><span>Intervención de Alcaldía</span></label>
-          <label class="inline-check"><input type="checkbox" value="ambas"><span>Con mantenimiento y reforzamiento</span></label>
-        </div>
+      <button id="toggleProgramas" class="collapse-title" aria-expanded="true"><span>Mejoras</span><span id="programasArrow">⌄</span></button>
+      <div id="programasBody" class="collapsible-body">
+        <p class="hint">Selecciona una o más mejoras. Dentro del apartado se incluyen planteles que pertenezcan a cualquiera de las mejoras elegidas; los demás filtros se cruzan con esta selección.</p>
+        <div class="section-actions"><button type="button" id="selectAllProgramas" class="compact-action">Seleccionar todos</button><button type="button" id="clearProgramas" class="compact-action secondary-action">Quitar todos</button></div>
+        <div id="programFilters" class="theme-checklist"></div>
       </div>
     </section>
 
-
     <section class="panel collapsible-panel">
-      <button id="toggleProgramas" class="collapse-title" aria-expanded="false"><span>Programas</span><span id="programasArrow">›</span></button>
-      <div id="programasBody" class="collapsible-body hidden">
-        <p class="hint">Selecciona uno o más proyectos. La selección es combinable con Mejoras y con las variables de Mantenimiento.</p>
-        <label for="programSearch">Buscar proyecto</label><input id="programSearch" type="search" placeholder="Filtrar la lista de proyectos">
-        <div class="section-actions"><button type="button" id="selectAllProgramas" class="compact-action">Seleccionar todos</button><button type="button" id="clearProgramas" class="compact-action secondary-action">Quitar todos</button></div>
-        <div class="selection-counter"><strong id="programSelectionCount">0</strong> proyectos seleccionados</div>
-        <div id="programFilters" class="program-checklist" aria-live="polite"></div>
+      <button id="toggleMantenimiento" class="collapse-title" aria-expanded="false"><span>Mantenimiento</span><span id="mantenimientoArrow">›</span></button>
+      <div id="mantenimientoBody" class="collapsible-body hidden">
+        <p class="hint">Selecciona una o varias necesidades. Se mostrarán únicamente los planteles que tengan pendiente al menos una de las opciones marcadas; este filtro se cruza con mejoras, prioridad y territorio.</p>
+        <div class="section-actions"><button type="button" id="selectAllMantenimiento" class="compact-action">Seleccionar todas</button><button type="button" id="clearMantenimiento" class="compact-action secondary-action">Quitar todas</button></div>
+        <div id="maintenanceFilters" class="theme-checklist maintenance-checklist"></div>
       </div>
     </section>
 
     <section class="panel collapsible-panel">
       <button id="toggleRiesgos" class="collapse-title" aria-expanded="false"><span>Observaciones territoriales</span><span id="riesgosArrow">›</span></button>
       <div id="riesgosBody" class="collapsible-body hidden">
-        <p class="hint">Estas opciones identifican escuelas que ameritan revisión por su cercanía a fracturamientos o por ubicarse en zonas de subsidencia alta.</p>
-        <label class="inline-check"><input type="radio" name="riskMode" value="obs_fractura"><span>Revisión por cercanía a fracturamiento</span></label>
-        <label class="inline-check"><input type="radio" name="riskMode" value="obs_subsidencia"><span>Seguimiento por subsidencia alta</span></label>
+        <p class="hint">Cruza la prioridad RM08 y las mejoras con la cercanía a fracturamientos o la subsidencia alta.</p>
+        <label class="inline-check"><input type="radio" name="riskMode" value="obs_fractura"><span>Cercanía a fracturamiento (≤ 250 m)</span></label>
+        <label class="inline-check"><input type="radio" name="riskMode" value="obs_subsidencia"><span>Subsidencia alta o muy alta</span></label>
         <label class="inline-check"><input type="radio" name="riskMode" value="obs_combinada"><span>Observación territorial combinada</span></label>
         <button type="button" id="clearRiesgos" class="submenu-clear">Quitar selección</button>
         <hr class="soft-rule">
-        <label class="inline-check"><input type="checkbox" id="toggleSubsidencias"><span>Mostrar subsidencias</span></label>
-        <label class="inline-check"><input type="checkbox" id="toggleFracturamiento"><span>Mostrar fracturamiento</span></label>
+        <div class="technical-layer-block">
+          <label class="inline-check"><input type="checkbox" id="toggleSubsidencias"><span>Mostrar subsidencias</span></label>
+          <details class="technical-note"><summary>¿Qué es la subsidencia?</summary><p>Es el descenso gradual del terreno por compactación del subsuelo. La capa clasifica la deformación acumulada de muy baja a muy alta y sirve como referencia territorial; no sustituye una evaluación estructural.</p></details>
+        </div>
+        <div class="technical-layer-block">
+          <label class="inline-check"><input type="checkbox" id="toggleFracturamiento"><span>Mostrar fracturamientos</span></label>
+          <details class="technical-note"><summary>¿Qué es el fracturamiento?</summary><p>Son trazos de fracturas superficiales cartografiadas. Se marca para revisión todo plantel ubicado hasta 250 metros de un trazo; la proximidad es indicativa y debe verificarse en campo.</p></details>
+        </div>
       </div>
     </section>
 
     <section class="panel compact">
-      <h2 id="summaryTitle">Resumen visible</h2>
+      <h2>Resumen visible</h2>
       <p id="activeCrossSummary" class="cross-summary">Sin cruces temáticos activos.</p>
       <div class="kpis dynamic-kpis">
-        <div><strong id="kpi1">0</strong><span id="kpiLabel1">Escuelas</span></div>
-        <div><strong id="kpi2">0</strong><span id="kpiLabel2">Mayor número de necesidades</span></div>
-        <div><strong id="kpi3">0</strong><span id="kpiLabel3">Con observación</span></div>
-        <div><strong id="kpi4">—</strong><span id="kpiLabel4">Tema</span></div>
+        <div><strong id="kpiPlanteles">0</strong><span>Inmuebles</span></div>
+        <div><strong id="kpiCct">0</strong><span>CCT</span></div>
+        <div><strong id="kpi2">0</strong><span>CCT/turno con prioridad alta o muy alta</span></div>
+        <div><strong id="kpi3">0</strong><span>CCT/turno con mejora</span></div>
+        <div><strong id="kpi4">0</strong><span>CCT/turno con observación</span></div>
+        <div><strong id="kpi5">0</strong><span>CCT/turno con apoyo previo</span></div>
+        <div><strong id="kpi6">0</strong><span>CCT/turno con mantenimiento pendiente</span></div>
       </div>
+      <p id="coverageNote" class="coverage-note"></p>
     </section>
   </aside>
 
@@ -97,12 +108,15 @@
   <section class="maparea">
     <div id="map"></div>
     <div id="mapStatus" class="map-status">Cargando información del visor…</div>
-    <div id="legend" class="legend"><div class="legend-head"><strong id="legendTitle">Atención de Revisión Diagnóstico</strong><button id="toggleLegend">−</button></div><div id="legendBody"></div></div>
-    <div id="subsidenciaLegend" class="legend extra-legend hidden"><div class="legend-head"><strong>Subsidencia acumulada</strong><button id="toggleSubLegend">−</button></div><div id="subLegendBody"><div><span class="swatch square s-muy-bajo"></span>0 a 7 cm Muy bajo</div><div><span class="swatch square s-bajo"></span>8 a 15 cm Bajo</div><div><span class="swatch square s-medio"></span>16 a 23 cm Medio</div><div><span class="swatch square s-alto"></span>24 a 31 cm Alto</div><div><span class="swatch square s-muy-alto"></span>32 a 40 cm Muy alto</div></div></div>
-    <aside id="detailPanel" class="detail-panel"><button id="closeDetail" class="close">×</button><h2 id="detailTitle">Seleccione una escuela</h2><div id="detailContent" class="detail-content"><p>Haga clic en un punto del mapa para consultar la información.</p></div></aside>
+    <div id="legend" class="legend"><div class="legend-head"><strong>Índice de Prioridad de Atención</strong><button id="toggleLegend" type="button">−</button></div><div id="legendBody"><div><span class="swatch c-muy-alta"></span>Muy alta</div><div><span class="swatch c-alta"></span>Alta</div><div><span class="swatch c-media"></span>Media</div><div><span class="swatch c-baja"></span>Baja</div><div><span class="swatch c-muy-baja"></span>Muy baja</div><div><span class="swatch c-sin-dato"></span>Sin información</div></div></div>
+    <div id="subsidenciaLegend" class="legend extra-legend hidden"><div class="legend-head"><strong>Subsidencia acumulada</strong><button id="toggleSubLegend" type="button">−</button></div><div id="subLegendBody"><div><span class="swatch square s-muy-bajo"></span>Muy baja</div><div><span class="swatch square s-bajo"></span>Baja</div><div><span class="swatch square s-medio"></span>Media</div><div><span class="swatch square s-alto"></span>Alta</div><div><span class="swatch square s-muy-alto"></span>Muy alta</div></div></div>
+    <aside id="detailPanel" class="detail-panel"><button id="closeDetail" class="close" type="button">×</button><h2 id="detailTitle">Seleccione un plantel</h2><div id="detailContent" class="detail-content"><p>Haga clic en un punto del mapa para consultar toda la información.</p></div></aside>
   </section>
 </main>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="script.js?v=20260818-1"></script>
+
+<script src="vendor/leaflet.js?v=1.9.4"></script>
+<script src="cct_master.js?v=20261019-conteos"></script>
+<script src="inmuebles_master.js?v=20261019-conteos"></script>
+<script src="script.js?v=20261019-conteos"></script>
 </body>
 </html>
