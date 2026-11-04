@@ -547,6 +547,8 @@ function showDetail(item, selection = {}) {
     ? [selectedCctItem?.alerta_ubicacion].filter(Boolean)
     : Object.values(hostItem.ubicaciones_por_verificar || {});
   const obraRows = getDetalleObraRows(selectedCct ? [selectedCct] : hostItem.ccts);
+  const obraGeneral = obraRows.length ? renderDetalleObraGeneral(obraRows, detailItem) : '';
+  const ayudasPrevistasRm08 = detailItem.tuvo_apoyo_previo ? renderAyudasPrevistasRm08(detailItem) : '';
   const maintenanceCards = detailItem.mantenimiento_disponible
     ? (detailItem.mantenimiento_pendientes.length
       ? detailItem.mantenimiento_pendientes.map(renderMaintenanceNeed).join('')
@@ -558,7 +560,6 @@ function showDetail(item, selection = {}) {
       <button class="tab-btn" data-tab="prioridad">Prioridad</button>
       <button class="tab-btn" data-tab="mantenimiento">Mantenimiento <span class="tab-count">${detailItem.mantenimiento_pendientes.length}</span></button>
       <button class="tab-btn" data-tab="programas">Mejoras <span class="tab-count">${detailItem.programa_registros.length}</span></button>
-      ${obraRows.length ? '<button class="tab-btn" data-tab="detalle-obra">Detalle de obra</button>' : ''}
       <button class="tab-btn" data-tab="territorio">Territorio</button>
     </div>
     <div class="tab-pane active" data-pane="general">
@@ -566,7 +567,8 @@ function showDetail(item, selection = {}) {
       ${locationWarnings.map(message => `<p class="context-note">${escapeHtml(message)}</p>`).join('')}
       <dl class="general-info-grid"><dt>Unidad</dt><dd>${selectedCct ? 'CCT' : 'Plantel'}</dd><dt>Código DGA</dt><dd>${escapeHtml(detailItem.codigos_dga.join(', ') || 'Sin dato')}</dd><dt>CCT</dt><dd>${escapeHtml(selectedCct || detailItem.ccts.join(', ') || 'Sin CCT')}</dd><dt>Turno</dt><dd>${escapeHtml(selectedTurnLabel)}</dd><dt>Alcaldía</dt><dd>${escapeHtml(effectiveTurn?.alcaldia || detailItem.alcaldia || 'Sin dato')}</dd><dt>Colonia</dt><dd>${escapeHtml(effectiveTurn?.colonia || detailItem.colonia || 'Sin dato')}</dd><dt>Domicilio</dt><dd>${escapeHtml(effectiveTurn?.domicilio || detailItem.domicilio || 'Sin dato')}</dd><dt>Nivel educativo</dt><dd>${escapeHtml(effectiveTurn?.nivel || detailItem.niveles.join(', ') || 'Sin dato')}</dd><dt>Coordenadas</dt><dd>${isMapped(detailItem) ? `${detailItem.lat.toFixed(6)}, ${detailItem.lon.toFixed(6)}` : 'Sin coordenadas'}</dd></dl>
       <div class="support-summary ${detailItem.tuvo_apoyo_previo ? 'has-support' : ''}"><span>Apoyo previo identificado</span><strong>${detailItem.tuvo_apoyo_previo ? 'Sí' : 'No'}</strong></div>
-      ${detailItem.tuvo_apoyo_previo ? `<h3 class="section-subtitle">Apoyos y trabajos recibidos</h3>${supportDetails}` : ''}
+      ${obraRows.length ? `<h3 class="section-subtitle">Detalle de obra</h3>${obraGeneral}` : ''}
+      ${detailItem.tuvo_apoyo_previo ? `<h3 class="section-subtitle">Ayudas previstas RM08</h3>${ayudasPrevistasRm08}` : ''}
     </div>
     <div class="tab-pane" data-pane="prioridad">
       <div class="priority-card priority-${prioritySlug}"><span>Índice de Prioridad de Atención</span><strong>${escapeHtml(detailItem.clase_prioridad_final)}</strong><em>${detailItem.indice_prioridad_final === null ? 'Sin índice completo' : `${detailItem.indice_prioridad_final.toFixed(1)} / 100`}</em></div>
@@ -580,10 +582,8 @@ function showDetail(item, selection = {}) {
     </div>
     <div class="tab-pane" data-pane="programas">
       <div class="support-summary ${detailItem.tuvo_apoyo_previo ? 'has-support' : ''}"><span>Apoyo previo identificado</span><strong>${detailItem.tuvo_apoyo_previo ? 'Sí' : 'No'}</strong></div>
-      <h3 class="section-subtitle">Apoyos y trabajos recibidos</h3>${supportDetails}
       <h3 class="section-subtitle">Registros de mejoras</h3>${programCards}
     </div>
-    ${obraRows.length ? `<div class="tab-pane" data-pane="detalle-obra">${renderDetalleObra(obraRows)}</div>` : ''}
     <div class="tab-pane" data-pane="territorio">
       <dl class="territory-info-grid"><dt>Índice territorial</dt><dd>${detailItem.indice_peligro_territorial === null ? 'Sin información' : `${detailItem.indice_peligro_territorial.toFixed(1)} / 100 · ${escapeHtml(detailItem.clase_peligro_territorial)}`}</dd><dt>Calidad territorial</dt><dd>${escapeHtml(detailItem.calidad_peligro_territorial)}</dd><dt>Resultado de observación</dt><dd>${escapeHtml(detailItem.observacion_territorial)}</dd><dt>Fracturamiento</dt><dd>${detailItem.cercano_fracturamiento_250m ? 'Sí, dentro de 250 m' : detailItem.distancia_fracturamiento_m === null ? 'Sin información' : 'No, fuera de 250 m'}</dd><dt>Distancia mínima</dt><dd>${detailItem.distancia_fracturamiento_m === null ? 'Sin información' : `${formatNumber(detailItem.distancia_fracturamiento_m)} m · nivel ${detailItem.nivel_fracturamiento}`}</dd><dt>Subsidencia/hundimiento</dt><dd>${escapeHtml(detailItem.clase_subsidencia)}${detailItem.nivel_subsidencia ? ` · nivel ${detailItem.nivel_subsidencia}` : ''}</dd></dl>
       <p class="method-note">La proximidad a fracturas y la clasificación de subsidencia son referencias territoriales para ordenar revisiones; no constituyen un dictamen estructural.</p>
@@ -597,6 +597,61 @@ function showDetail(item, selection = {}) {
 function getDetalleObraRows(ccts) {
   const rows = (ccts || []).flatMap(cct => detalleObraPorCct[cct] || []);
   return [...new Map(rows.map(row => [JSON.stringify([row.contrato, row.descripcion]), row])).values()];
+}
+
+function splitDetalleObraConceptos(descripcion) {
+  const concepts = [];
+  let current = '';
+  let parenthesisDepth = 0;
+  const addConcept = () => {
+    const concept = current.trim().replace(/\s+/g, ' ').replace(/[.;,]+$/, '');
+    if (concept) concepts.push(concept);
+    current = '';
+  };
+  for (const character of String(descripcion || '')) {
+    if (character === '(') parenthesisDepth += 1;
+    if (character === ')' && parenthesisDepth > 0) parenthesisDepth -= 1;
+    if ((character === ';' || character === ',' || character === '\n') && parenthesisDepth === 0) {
+      addConcept();
+    } else {
+      current += character;
+    }
+  }
+  addConcept();
+  return concepts;
+}
+
+function renderDetalleObraGeneral(rows, item) {
+  const supports = Array.isArray(item.apoyos_recibidos_detalle) ? item.apoyos_recibidos_detalle : [];
+  return `<div class="support-detail-list">${rows.map(row => {
+    const support = supports.find(candidate => clean(candidate.contrato) === clean(row.contrato));
+    const executors = [...new Set(supports.map(candidate => candidate.ejecutor).filter(Boolean))];
+    const executor = support?.ejecutor || (executors.length === 1 ? executors[0] : 'Sin dato');
+    const concepts = splitDetalleObraConceptos(row.descripcion);
+    return `<article class="support-detail">
+      <div class="support-detail-head"><span class="support-check" aria-hidden="true">✓</span><div><small>Detalle de obra</small><strong>Ejecutor: ${escapeHtml(executor)}</strong><em>Número de contrato: ${escapeHtml(row.contrato || 'Sin dato')}</em></div></div>
+      ${concepts.length ? `<ul class="support-work-list">${concepts.map(concept => `<li><span aria-hidden="true">✓</span><strong>${escapeHtml(concept)}</strong></li>`).join('')}</ul>` : '<p>El contrato no incluye conceptos de obra desglosados.</p>'}
+    </article>`;
+  }).join('')}</div>`;
+}
+
+function renderAyudasPrevistasRm08(item) {
+  const supports = Array.isArray(item.apoyos_recibidos_detalle) ? item.apoyos_recibidos_detalle : [];
+  const lines = [];
+  if (supports.length) {
+    supports.forEach(support => {
+      lines.push(`Programa: ${support.programa || 'Apoyo registrado'}`);
+      if (support.ejecutor) lines.push(`Ejecutor: ${support.ejecutor}`);
+      if (support.etapa) lines.push(`Etapa: ${support.etapa}`);
+      if (support.estado) lines.push(`Estado: ${support.estado}`);
+      if (support.contrato) lines.push(`Contrato: ${support.contrato}`);
+      (Array.isArray(support.trabajos) ? support.trabajos : []).forEach(work => lines.push(work));
+    });
+  } else {
+    (Array.isArray(item.mejoras_previas) ? item.mejoras_previas : []).forEach(program => lines.push(program));
+  }
+  if (!lines.length) return '<p class="muted-box">El padrón confirma apoyo previo, pero no incluye su desglose.</p>';
+  return `<div class="rm08-help-list">${lines.map(line => `<p>— ${escapeHtml(line)}</p>`).join('')}</div>`;
 }
 
 function renderDetalleObra(rows) {

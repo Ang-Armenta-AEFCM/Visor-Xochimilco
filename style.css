@@ -284,3 +284,8 @@ body.is-fullscreen .topbar{position:relative}
   .detail-content dd{margin-bottom:8px}
   .selector-button{flex:1 1 calc(50% - 7px)}
 }
+
+/* Listado simple de Ayudas previstas RM08 dentro de General */
+.rm08-help-list{margin:0;padding:12px 14px;border:1px solid #dbe6eb;border-radius:9px;background:#f8fafc}
+.rm08-help-list p{margin:0 0 7px;color:#334155;font-size:12px;line-height:1.45}
+.rm08-help-list p:last-child{margin-bottom:0}
