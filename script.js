@@ -68,7 +68,7 @@ bootstrap();
 async function bootstrap() {
   try {
     const [main, turnCatalog, alcaldias, subsidencias, fracturamiento, conteoInmuebles, detalleObra, propuestas2027] = await Promise.all([
-      loadMainData(), fetchJson(DATA.turnos), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento), fetchJson(DATA.conteoInmuebles), fetchJson(DATA.detalleObra), fetchJson(DATA.propuestas2027)
+      loadMainData(), fetchJson(DATA.turnos), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento), fetchJson(DATA.conteoInmuebles), fetchJson(DATA.detalleObra), fetchOptionalJson(DATA.propuestas2027, {metadata:{}, registros:[], por_cct:{}})
     ]);
     propuestas2027PorCct = propuestas2027.por_cct || {};
     dataset = applyProposal2027(InmueblesMaster.apply(CctMaster.merge(main, turnCatalog), conteoInmuebles), propuestas2027);
@@ -178,6 +178,15 @@ async function fetchJson(url) {
   const response = await fetch(url, {cache:'no-store'});
   if (!response.ok) throw new Error(`Error ${response.status} al cargar ${url}`);
   return response.json();
+}
+
+async function fetchOptionalJson(url, fallback) {
+  try {
+    return await fetchJson(url);
+  } catch (error) {
+    console.warn(`No se pudo cargar el archivo complementario ${url}.`, error);
+    return fallback;
+  }
 }
 
 const OFFICIAL_ALCALDIAS = new Map([
