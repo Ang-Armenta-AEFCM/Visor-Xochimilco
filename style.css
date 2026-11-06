@@ -289,3 +289,13 @@ body.is-fullscreen .topbar{position:relative}
 .rm08-help-list{margin:0;padding:12px 14px;border:1px solid #dbe6eb;border-radius:9px;background:#f8fafc}
 .rm08-help-list p{margin:0 0 7px;color:#334155;font-size:12px;line-height:1.45}
 .rm08-help-list p:last-child{margin-bottom:0}
+
+/* Propuestas 2026 para ejecución 2027 */
+.proposal-detail-list{display:grid;gap:9px}
+.proposal-detail-card{padding:11px;border:1px solid #99f6e4;border-left:5px solid var(--proposal-color);border-radius:9px;background:#f0fdfa}
+.proposal-detail-card>strong{display:block;margin-bottom:9px;color:#115e59;font-size:12px;line-height:1.4}
+.proposal-detail-card dl{display:grid;grid-template-columns:minmax(112px,38%) minmax(0,1fr);gap:6px 10px;margin:0;font-size:11px}
+.proposal-detail-card dt{font-weight:800;color:#475569;overflow-wrap:anywhere}
+.proposal-detail-card dd{margin:0;color:#1f2937;overflow-wrap:anywhere;word-break:break-word}
+@media(max-width:560px){.proposal-detail-card dl{grid-template-columns:1fr;gap:2px}.proposal-detail-card dd{margin-bottom:7px}}
+

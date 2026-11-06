@@ -5,6 +5,7 @@ const DATA = {
   turnos: 'data/catalogo_cct_turnos.json',
   conteoInmuebles: 'data/inmuebles_conteo.json?v=20261005-inmuebles-2769',
   detalleObra: 'data/detalle_obra_2025.json?v=20261005-actas-2025',
+  propuestas2027: 'data/propuestas_2026_ejecucion_2027.json?v=20261106',
   supports: 'data/apoyos_detallados.json',
   alcaldias: 'data/alcaldias.json',
   subsidencias: 'data/subsidencias.json',
@@ -23,6 +24,10 @@ const isMapped = item => Number.isFinite(item.lat) && Number.isFinite(item.lon);
 
 let dataset;
 let detalleObraPorCct = {};
+let propuestas2027PorCct = {};
+const PROPOSAL_2027_ID = 'propuestas_2026_ejecucion_2027';
+const PROPOSAL_2027_LABEL = 'Propuestas 2026 para ejecución 2027';
+const PROPOSAL_2027_COLOR = '#0d9488';
 let programMap = new Map();
 let maintenanceMap = new Map();
 let cctRecordMap = new Map();
@@ -62,12 +67,13 @@ bootstrap();
 
 async function bootstrap() {
   try {
-    const [main, turnCatalog, alcaldias, subsidencias, fracturamiento, conteoInmuebles, detalleObra] = await Promise.all([
-      loadMainData(), fetchJson(DATA.turnos), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento), fetchJson(DATA.conteoInmuebles), fetchJson(DATA.detalleObra)
+    const [main, turnCatalog, alcaldias, subsidencias, fracturamiento, conteoInmuebles, detalleObra, propuestas2027] = await Promise.all([
+      loadMainData(), fetchJson(DATA.turnos), fetchJson(DATA.alcaldias), fetchJson(DATA.subsidencias), fetchJson(DATA.fracturamiento), fetchJson(DATA.conteoInmuebles), fetchJson(DATA.detalleObra), fetchJson(DATA.propuestas2027)
     ]);
-    dataset = InmueblesMaster.apply(CctMaster.merge(main, turnCatalog), conteoInmuebles);
+    propuestas2027PorCct = propuestas2027.por_cct || {};
+    dataset = applyProposal2027(InmueblesMaster.apply(CctMaster.merge(main, turnCatalog), conteoInmuebles), propuestas2027);
     dataset.metadata.cct_con_indice_final = dataset.ccts.filter(record => Number.isFinite(record.indice_prioridad_final)).length;
-    dataset.programas = dataset.programas.map(program => ({...program, count:dataset.ccts.filter(record => record.programas.includes(program.id)).length}));
+    dataset.programas = dataset.programas.map(program => ({...program, count:program.id === PROPOSAL_2027_ID ? dataset.inmuebles.filter(record => record.programas.includes(program.id)).length : dataset.ccts.filter(record => record.programas.includes(program.id)).length}));
     dataset.inmuebles_conteo = conteoInmuebles;
     detalleObraPorCct = detalleObra;
     programMap = new Map(dataset.programas.map(program => [program.id, program]));
@@ -130,6 +136,41 @@ async function loadMainData() {
     programas,
     inmuebles,
     ccts
+  };
+}
+
+function applyProposal2027(main, proposals) {
+  const proposalRows = Array.isArray(proposals?.registros) ? proposals.registros : [];
+  const proposalByCct = proposals?.por_cct || {};
+  const attach = item => {
+    const rows = [...new Map((item.ccts || [])
+      .flatMap(cct => proposalByCct[cct] || [])
+      .map(row => [row.id, row])).values()];
+    if (!rows.length) return item;
+    const refs = rows.map(row => ({programa:PROPOSAL_2027_ID, registro:{id:row.id, campos:[]}}));
+    return {
+      ...item,
+      programas:[...new Set([...(item.programas || []), PROPOSAL_2027_ID])],
+      programa_registros:[...(item.programa_registros || []), ...refs]
+    };
+  };
+  const ccts = (main.ccts || []).map(attach);
+  const inmuebles = (main.inmuebles || []).map(attach);
+  const matchedProposalIds = new Set(inmuebles
+    .flatMap(item => (item.ccts || []).flatMap(cct => proposalByCct[cct] || []))
+    .map(row => row.id));
+  const program = {
+    id:PROPOSAL_2027_ID,
+    label:PROPOSAL_2027_LABEL,
+    color:PROPOSAL_2027_COLOR,
+    sheet:proposals?.metadata?.hoja || 'ESCUELAS (206)',
+    count:matchedProposalIds.size
+  };
+  return {
+    ...main,
+    programas:[...(main.programas || []).filter(item => item.id !== PROPOSAL_2027_ID), program],
+    ccts,
+    inmuebles
   };
 }
 
@@ -213,7 +254,7 @@ function normalizeDatasetCategories(main, turnCatalog = {}) {
 
 function configureBoundary(geojson) {
   alcaldiasLayer = L.geoJSON(geojson, {
-    style: {color:'#315b7d', weight:1.1, fillColor:'#dbe7ef', fillOpacity:.05, dashArray:'4 3'},
+    style: {color:'#244d6d', weight:1.8, opacity:.95, fillColor:'#dbe7ef', fillOpacity:.05, dashArray:'4 3'},
     interactive:false
   }).addTo(map);
   map.fitBounds(alcaldiasLayer.getBounds(), {padding:[24,24]});
@@ -409,12 +450,12 @@ function render(fitResult) {
   try { localStorage.setItem('rm08_visor_state_xochimilco', JSON.stringify(state)); } catch (_) {}
   currentCcts = InmueblesMaster.filterCcts(dataset, state);
   currentItems = InmueblesMaster.groupsForCcts(dataset, currentCcts);
-  drawMarkers();
+  drawMarkers(state);
   updateSummary(state);
   if (fitResult && !hasFitResult) fitCurrentResult();
 }
 
-function drawMarkers() {
+function drawMarkers(state) {
   markersLayer.clearLayers();
   if (!q('toggleSchools').checked) return;
   const canvas = L.canvas({padding:.35});
@@ -428,11 +469,12 @@ function drawMarkers() {
     const group = coincident.get(`${item.lat.toFixed(7)}|${item.lon.toFixed(7)}`);
     const angle = 2 * Math.PI * group.indexOf(item) / group.length;
     const radius = group.length > 1 ? 0.000075 : 0;
+    const proposalHighlighted = state.programas.includes(PROPOSAL_2027_ID) && item.programas.includes(PROPOSAL_2027_ID);
     const marker = L.circleMarker([item.lat + Math.sin(angle) * radius, item.lon + Math.cos(angle) * radius], {
       renderer:canvas,
-      radius:6,
-      color:'#fff',
-      weight:1.3,
+      radius:proposalHighlighted ? 7 : 6,
+      color:proposalHighlighted ? PROPOSAL_2027_COLOR : '#fff',
+      weight:proposalHighlighted ? 4 : 1.3,
       fillColor:priorityColor(item.clase_prioridad_final),
       fillOpacity:.9
     });
@@ -549,6 +591,8 @@ function showDetail(item, selection = {}) {
   const obraRows = getDetalleObraRows(selectedCct ? [selectedCct] : hostItem.ccts);
   const obraGeneral = obraRows.length ? renderDetalleObraGeneral(obraRows, detailItem) : '';
   const ayudasPrevistasRm08 = detailItem.tuvo_apoyo_previo ? renderAyudasPrevistasRm08(detailItem) : '';
+  const propuesta2027Rows = getPropuesta2027Rows(selectedCct ? [selectedCct] : hostItem.ccts);
+  const detallePropuesta2027 = propuesta2027Rows.length ? renderDetallePropuesta2027(propuesta2027Rows) : '';
   const maintenanceCards = detailItem.mantenimiento_disponible
     ? (detailItem.mantenimiento_pendientes.length
       ? detailItem.mantenimiento_pendientes.map(renderMaintenanceNeed).join('')
@@ -569,6 +613,7 @@ function showDetail(item, selection = {}) {
       <div class="support-summary ${detailItem.tuvo_apoyo_previo ? 'has-support' : ''}"><span>Apoyo previo identificado</span><strong>${detailItem.tuvo_apoyo_previo ? 'Sí' : 'No'}</strong></div>
       ${obraRows.length ? `<h3 class="section-subtitle">Detalle de obra</h3>${obraGeneral}` : ''}
       ${detailItem.tuvo_apoyo_previo ? `<h3 class="section-subtitle">Ayudas previstas RM08</h3>${ayudasPrevistasRm08}` : ''}
+      ${propuesta2027Rows.length ? `<h3 class="section-subtitle">Detalle de propuesta</h3>${detallePropuesta2027}` : ''}
     </div>
     <div class="tab-pane" data-pane="prioridad">
       <div class="priority-card priority-${prioritySlug}"><span>Índice de Prioridad de Atención</span><strong>${escapeHtml(detailItem.clase_prioridad_final)}</strong><em>${detailItem.indice_prioridad_final === null ? 'Sin índice completo' : `${detailItem.indice_prioridad_final.toFixed(1)} / 100`}</em></div>
@@ -592,6 +637,33 @@ function showDetail(item, selection = {}) {
   q('detailContent').querySelectorAll('.tab-btn').forEach(button => button.addEventListener('click', () => activateTab(button.dataset.tab)));
   q('detailContent').querySelectorAll('[data-cct]').forEach(button => button.addEventListener('click', () => showDetail(hostItem, {cct:button.dataset.cct})));
   q('detailContent').querySelectorAll('[data-turn]').forEach(button => button.addEventListener('click', () => showDetail(hostItem, {cct:selectedCct, turno:button.dataset.turn})));
+}
+
+function getPropuesta2027Rows(ccts) {
+  const rows = (ccts || []).flatMap(cct => propuestas2027PorCct[cct] || []);
+  return [...new Map(rows.map(row => [row.id, row])).values()];
+}
+
+function renderDetallePropuesta2027(rows) {
+  const fields = [
+    ['Número', row => row.numero],
+    ['Listado', row => row.listado],
+    ['Procedencia', row => row.procedencia],
+    ['# CxC', row => row.cxc],
+    ['Área responsable', row => row.area_responsable],
+    ['Clave del inmueble', row => row.clave_inmueble],
+    ['Clave de unidad territorial', row => row.clave_unidad_territorial],
+    ['Unidad territorial', row => row.unidad_territorial]
+  ];
+  return `<div class="proposal-detail-list">${rows.map(row => {
+    const visibleFields = fields
+      .map(([label, getter]) => [label, getter(row)])
+      .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
+    return `<article class="proposal-detail-card" style="--proposal-color:${PROPOSAL_2027_COLOR}">
+      <strong>${escapeHtml(PROPOSAL_2027_LABEL)}</strong>
+      <dl>${visibleFields.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>
+    </article>`;
+  }).join('')}</div>`;
 }
 
 function getDetalleObraRows(ccts) {
@@ -740,3 +812,4 @@ function syncFullscreen() {
   document.body.classList.toggle('is-fullscreen', active);
   setTimeout(() => map.invalidateSize(), 100);
 }
+
